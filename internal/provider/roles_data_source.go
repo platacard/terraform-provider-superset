@@ -28,8 +28,7 @@ type rolesDataSource struct {
 
 // rolesDataSourceModel maps the data source schema data.
 type rolesDataSourceModel struct {
-	Roles []roleModel  `tfsdk:"roles"`
-	ID    types.String `tfsdk:"id"`
+	Roles []roleModel `tfsdk:"roles"`
 }
 
 // roleModel maps the role schema data.
@@ -48,10 +47,6 @@ func (d *rolesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		Description: "Fetches the list of roles from Superset.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Description: "ID of the data source.",
-				Computed:    true,
-			},
 			"roles": schema.ListNestedAttribute{
 				Description: "List of roles.",
 				Computed:    true,
@@ -91,8 +86,6 @@ func (d *rolesDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 			Name: types.StringValue(role.Name),
 		})
 	}
-
-	state.ID = types.StringValue("placeholder")
 
 	diags := resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)

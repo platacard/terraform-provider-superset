@@ -27,7 +27,6 @@ data "superset_role_permissions" "all" {
 
 ### Read-Only
 
-- `id` (String) ID of the data source.
 - `permissions` (Attributes List) List of permissions. (see [below for nested schema](#nestedatt--permissions))
 
 <a id="nestedatt--permissions"></a>

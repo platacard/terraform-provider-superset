@@ -1,2 +1,2 @@
 # Role permissions can be imported by specifying the numeric identifier of the role id
-terraform import 'superset_role_permissions.team' 129
+terraform import superset_role_permissions.example 129

@@ -28,7 +28,6 @@ type rolePermissionsDataSource struct {
 
 // rolePermissionsDataSourceModel maps the data source schema data.
 type rolePermissionsDataSourceModel struct {
-	ID          types.String      `tfsdk:"id"`
 	RoleName    types.String      `tfsdk:"role_name"`
 	Permissions []permissionModel `tfsdk:"permissions"`
 }
@@ -50,10 +49,6 @@ func (d *rolePermissionsDataSource) Schema(_ context.Context, _ datasource.Schem
 	resp.Schema = schema.Schema{
 		Description: "Fetches the permissions for a role from Superset.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Description: "ID of the data source.",
-				Computed:    true,
-			},
 			"role_name": schema.StringAttribute{
 				Description: "Name of the role.",
 				Required:    true,
@@ -118,7 +113,6 @@ func (d *rolePermissionsDataSource) Read(ctx context.Context, req datasource.Rea
 		})
 	}
 
-	state.ID = types.StringValue("placeholder")
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 }
