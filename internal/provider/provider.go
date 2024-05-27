@@ -198,6 +198,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 	return []func() datasource.DataSource{
 		NewRolesDataSource,           // Existing data source
 		NewRolePermissionsDataSource, // New data source
+		NewDatabasesDataSource,       // New databases data source
 	}
 }
 

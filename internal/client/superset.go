@@ -519,6 +519,130 @@ func (c *Client) FetchRoles() ([]rawRoleModel, error) {
 	return result.Roles, nil
 }
 
+// GetDatabaseSchemasByID retrieves the database schemas by the given database ID.
+// It makes a GET request to the Superset API and returns a list of schema names.
+// If the request fails or the response status code is not 200 OK, an error is returned.
+func (c *Client) GetDatabaseSchemasByID(databaseID int64) ([]string, error) {
+	endpoint := fmt.Sprintf("/api/v1/database/%d/schemas/", databaseID)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch schemas from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Result []string `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
+// GetDatabaseConnectionByID retrieves the database connection information by its ID from Superset.
+// It makes a GET request to the Superset API and returns the response as a map[string]interface{}.
+// If the request fails or the response status code is not 200 OK, an error is returned.
+func (c *Client) GetDatabaseConnectionByID(databaseID int64) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("/api/v1/database/%d/connection", databaseID)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch database connection from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// GetAllDatabases retrieves all databases from Superset.
+func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
+	endpoint := "/api/v1/database/"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch databases from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Result []map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
+// GetDatabasesInfos retrieves information about all databases.
+// It returns a map containing the details of each database, including the database ID, name, schemas, and SQLAlchemy URI.
+// If an error occurs during the retrieval process, it returns nil and the error.
+func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
+	databasesInfo, err := c.GetAllDatabases()
+	if err != nil {
+		return nil, err
+	}
+	databasesList := []map[string]interface{}{}
+
+	for _, db := range databasesInfo {
+		dbID, ok := db["id"].(float64)
+		if !ok {
+			continue
+		}
+		databaseDetails, err := c.GetDatabaseConnectionByID(int64(dbID))
+		if err != nil {
+			return nil, err
+		}
+
+		var sqlalchemyURI, databaseName string
+		if result, ok := databaseDetails["result"].(map[string]interface{}); ok {
+			sqlalchemyURI, _ = result["sqlalchemy_uri"].(string)
+			databaseName, _ = result["database_name"].(string)
+		}
+
+		if sqlalchemyURI == "" {
+			sqlalchemyURI = "URI not provided"
+		}
+
+		if databaseName == "" {
+			databaseName = "Name not provided"
+		}
+
+		schemas, err := c.GetDatabaseSchemasByID(int64(dbID))
+		if err != nil {
+			return nil, err
+		}
+
+		databasesList = append(databasesList, map[string]interface{}{
+			"id":             int64(dbID),
+			"database_name":  databaseName,
+			"schemas":        schemas,
+			"sqlalchemy_uri": sqlalchemyURI,
+		})
+	}
+
+	return map[string]interface{}{"databases": databasesList}, nil
+}
+
 // rawRoleModel represents a raw role model in the Superset client.
 type rawRoleModel struct {
 	ID   int64  `json:"id"`
