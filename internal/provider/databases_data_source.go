@@ -103,7 +103,19 @@ func (d *databasesDataSource) Read(ctx context.Context, req datasource.ReadReque
 		return
 	}
 
-	for _, db := range dbInfos["databases"].([]map[string]interface{}) {
+	dbInfosRaw, ok := dbInfos["databases"].([]map[string]interface{})
+	if !ok {
+		tflog.Error(ctx, "Type assertion error for databases", map[string]interface{}{
+			"databases_type": fmt.Sprintf("%T", dbInfos["databases"]),
+		})
+		resp.Diagnostics.AddError(
+			"Type Assertion Error",
+			fmt.Sprintf("Expected []map[string]interface{} for databases, got: %T", dbInfos["databases"]),
+		)
+		return
+	}
+
+	for _, db := range dbInfosRaw {
 		tflog.Debug(ctx, "Processing database", map[string]interface{}{
 			"database": db,
 		})
