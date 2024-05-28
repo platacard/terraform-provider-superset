@@ -14,6 +14,7 @@ type Client struct {
 	Username string
 	Password string
 	Token    string
+	Cookies  []*http.Cookie
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
@@ -81,6 +82,7 @@ func (c *Client) authenticate() error {
 	}
 
 	c.Token = token
+	c.Cookies = resp.Cookies()
 	return nil
 }
 
@@ -110,6 +112,66 @@ func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.
 	client := &http.Client{}
 	return client.Do(req)
 }
+
+// DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies
+func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload interface{}, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
+	url := fmt.Sprintf("%s%s", c.Host, endpoint)
+	var jsonPayload []byte
+	var err error
+
+	if payload != nil {
+		jsonPayload, err = json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+
+	client := &http.Client{}
+	return client.Do(req)
+}
+
+// GetCSRFToken retrieves the CSRF token
+func (c *Client) GetCSRFToken() (string, []*http.Cookie, error) {
+	headers := map[string]string{
+		"Referer": c.Host,
+	}
+	resp, err := c.DoRequestWithHeadersAndCookies("GET", "/api/v1/security/csrf_token/", nil, headers, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("failed to get CSRF token, status code: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return "", nil, err
+	}
+
+	csrfToken, ok := result["result"].(string)
+	if !ok {
+		return "", nil, fmt.Errorf("failed to retrieve CSRF token from response")
+	}
+
+	return csrfToken, resp.Cookies(), nil
+}
+
 
 // GetRoleIDByName retrieves the ID of a role by its name from the Superset API.
 // It sends a GET request to the Superset API to fetch all roles, and then searches for the role with the specified name.
@@ -641,6 +703,96 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{"databases": databasesList}, nil
+}
+
+// CreateDatabase creates a new database in Superset
+func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/database/", payload, headers, cookies)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to create database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// UpdateDatabase updates an existing database in Superset
+func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}) (map[string]interface{}, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", fmt.Sprintf("/api/v1/database/%d", databaseID), payload, headers, cookies)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to update database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// DeleteDatabase deletes a database in Superset
+func (c *Client) DeleteDatabase(databaseID int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", fmt.Sprintf("/api/v1/database/%d", databaseID), nil, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return fmt.Errorf("failed to delete database, status code: %d, response: %s", resp.StatusCode, string(body))
+    }
+
+	return nil
 }
 
 // rawRoleModel represents a raw role model in the Superset client.

@@ -207,5 +207,6 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 	return []func() resource.Resource{
 		NewRoleResource,            // New resource
 		NewRolePermissionsResource, // New resource
+		NewDatabaseResource,        // New resource
 	}
 }
