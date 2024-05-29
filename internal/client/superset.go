@@ -452,14 +452,6 @@ func (c *Client) DeleteRole(id int64) error {
 // Returns:
 // - int64: The ID of the permission resource if found.
 // - error: An error if the request fails or if the permission resource is not found.
-//
-// Example usage:
-//
-//	id, err := client.GetPermissionIDByNameAndView("edit", "dashboard")
-//	if err != nil {
-//	  log.Fatal(err)
-//	}
-//	fmt.Println("Permission ID:", id)
 func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
 	endpoint := "/api/v1/security/permissions-resources?q=(page_size:5000)"
 	resp, err := c.DoRequest("GET", endpoint, nil)
@@ -704,7 +696,9 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	return map[string]interface{}{"databases": databasesList}, nil
 }
 
-// CreateDatabase creates a new database in Superset.
+// CreateDatabase creates a new database in the Superset application.
+// It takes a payload map[string]interface{} as input, which contains the necessary data for creating the database.
+// The function returns a map[string]interface{} containing the response from the API and an error, if any.
 func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -736,7 +730,8 @@ func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]inte
 	return result, nil
 }
 
-// UpdateDatabase updates an existing database in Superset.
+// UpdateDatabase updates a database with the given ID using the provided payload.
+// It returns the updated database as a map[string]interface{} and an error if any.
 func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}) (map[string]interface{}, error) {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -768,7 +763,9 @@ func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}
 	return result, nil
 }
 
-// DeleteDatabase deletes a database in Superset.
+// DeleteDatabase deletes a database with the given databaseID.
+// It sends a DELETE request to the Superset API to delete the database.
+// If the request is successful, it returns nil. Otherwise, it returns an error.
 func (c *Client) DeleteDatabase(databaseID int64) error {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
