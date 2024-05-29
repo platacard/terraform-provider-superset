@@ -157,14 +157,51 @@ func (r *databaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	plan.ID = types.Int64Value(int64(result["id"].(float64)))
-	resultData := result["result"].(map[string]interface{})
-	plan.ConnectionName = types.StringValue(resultData["database_name"].(string))
-	plan.AllowCTAS = types.BoolValue(resultData["allow_ctas"].(bool))
-	plan.AllowCVAS = types.BoolValue(resultData["allow_cvas"].(bool))
-	plan.AllowDML = types.BoolValue(resultData["allow_dml"].(bool))
-	plan.AllowRunAsync = types.BoolValue(resultData["allow_run_async"].(bool))
-	plan.ExposeInSQLLab = types.BoolValue(resultData["expose_in_sqllab"].(bool))
+	// Type assertion with error handling
+	idFloat, ok := result["id"].(float64)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Invalid Response",
+			"The 'id' field in the response is not a float64",
+		)
+		return
+	}
+	plan.ID = types.Int64Value(int64(idFloat))
+
+	resultData, ok := result["result"].(map[string]interface{})
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Invalid Response",
+			"The response from the API does not contain the expected 'result' field",
+		)
+		return
+	}
+
+	// Handle type assertions with error handling
+	if val, ok := resultData["database_name"].(string); ok {
+		plan.ConnectionName = types.StringValue(val)
+	} else {
+		resp.Diagnostics.AddError(
+			"Invalid Response",
+			"The response from the API does not contain a valid 'database_name' field",
+		)
+		return
+	}
+	if val, ok := resultData["allow_ctas"].(bool); ok {
+		plan.AllowCTAS = types.BoolValue(val)
+	}
+	if val, ok := resultData["allow_cvas"].(bool); ok {
+		plan.AllowCVAS = types.BoolValue(val)
+	}
+	if val, ok := resultData["allow_dml"].(bool); ok {
+		plan.AllowDML = types.BoolValue(val)
+	}
+	if val, ok := resultData["allow_run_async"].(bool); ok {
+		plan.AllowRunAsync = types.BoolValue(val)
+	}
+	if val, ok := resultData["expose_in_sqllab"].(bool); ok {
+		plan.ExposeInSQLLab = types.BoolValue(val)
+	}
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
