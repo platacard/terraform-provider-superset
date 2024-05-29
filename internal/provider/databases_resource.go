@@ -8,8 +8,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -417,8 +417,8 @@ func (r *databaseResource) ImportState(ctx context.Context, req resource.ImportS
 
 	// Call Read to refresh the state with the latest data
 	r.Read(ctx, resource.ReadRequest{State: resp.State}, &resource.ReadResponse{
-		State:        resp.State,
-		Diagnostics:  resp.Diagnostics,
+		State:       resp.State,
+		Diagnostics: resp.Diagnostics,
 	})
 
 	tflog.Debug(ctx, "ImportState completed successfully", map[string]interface{}{

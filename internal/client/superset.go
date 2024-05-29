@@ -172,7 +172,6 @@ func (c *Client) GetCSRFToken() (string, []*http.Cookie, error) {
 	return csrfToken, resp.Cookies(), nil
 }
 
-
 // GetRoleIDByName retrieves the ID of a role by its name from the Superset API.
 // It sends a GET request to the Superset API to fetch all roles, and then searches for the role with the specified name.
 // If the role is found, its ID is returned. Otherwise, an error is returned.
@@ -787,10 +786,10 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 	}
 	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return fmt.Errorf("failed to delete database, status code: %d, response: %s", resp.StatusCode, string(body))
-    }
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
 
 	return nil
 }
