@@ -113,7 +113,7 @@ func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.
 	return client.Do(req)
 }
 
-// DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies
+// DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies.
 func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload interface{}, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.Host, endpoint)
 	var jsonPayload []byte
@@ -143,7 +143,7 @@ func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload
 	return client.Do(req)
 }
 
-// GetCSRFToken retrieves the CSRF token
+// GetCSRFToken retrieves the CSRF token.
 func (c *Client) GetCSRFToken() (string, []*http.Cookie, error) {
 	headers := map[string]string{
 		"Referer": c.Host,
@@ -704,7 +704,7 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	return map[string]interface{}{"databases": databasesList}, nil
 }
 
-// CreateDatabase creates a new database in Superset
+// CreateDatabase creates a new database in Superset.
 func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -736,7 +736,7 @@ func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]inte
 	return result, nil
 }
 
-// UpdateDatabase updates an existing database in Superset
+// UpdateDatabase updates an existing database in Superset.
 func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}) (map[string]interface{}, error) {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -768,7 +768,7 @@ func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}
 	return result, nil
 }
 
-// DeleteDatabase deletes a database in Superset
+// DeleteDatabase deletes a database in Superset.
 func (c *Client) DeleteDatabase(databaseID int64) error {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
