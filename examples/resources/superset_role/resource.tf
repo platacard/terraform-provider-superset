@@ -1,3 +1,3 @@
 resource "superset_role" "example" {
-  name = "Analytics"
+  name = "Example-Role-Name"
 }

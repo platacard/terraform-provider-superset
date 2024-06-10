@@ -14,10 +14,10 @@ Manages the permissions associated with a role in Superset.
 
 ```terraform
 resource "superset_role_permissions" "example" {
-  role_name = "DWH-DB-Connect"
+  role_name = "Example-DB-Connect"
   resource_permissions = [
     { permission = "database_access", view_menu = "[Trino].(id:34)" },
-    { permission = "schema_access", view_menu = "[Trino].[devoriginationzestorage]" },
+    { permission = "schema_access", view_menu = "[Trino].[devstorage]" },
   ]
 }
 ```

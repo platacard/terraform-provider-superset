@@ -14,7 +14,7 @@ Manages a role in Superset.
 
 ```terraform
 resource "superset_role" "example" {
-  name = "Analytics"
+  name = "Example-Role-Name"
 }
 ```
 

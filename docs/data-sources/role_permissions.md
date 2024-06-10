@@ -14,7 +14,7 @@ Fetches the permissions for a role from Superset.
 
 ```terraform
 data "superset_role_permissions" "all" {
-  role_name = "DWH-DB-Connect"
+  role_name = "Example-DB-Connect"
 }
 ```
 
