@@ -199,6 +199,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewRolesDataSource,           // Existing data source
 		NewRolePermissionsDataSource, // New data source
 		NewDatabasesDataSource,       // New databases data source
+		NewDatasetsDataSource,		// New datasets data source
 	}
 }
 
@@ -208,5 +209,6 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewRoleResource,            // New resource
 		NewRolePermissionsResource, // New resource
 		NewDatabaseResource,        // New resource
+		// NewDatasetResource,         // New resource
 	}
 }

@@ -791,6 +791,96 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 	return nil
 }
 
+// CreateDataset creates a new dataset in Superset
+func (c *Client) CreateDataset(payload map[string]interface{}) (map[string]interface{}, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/dataset/", payload, headers, cookies)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to create dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// GetUserIDByName fetches the user ID by username from the Superset instance
+func (c *Client) GetUserIDByName(username string) (int64, error) {
+	endpoint := "/api/v1/users?q=(filters:[(username:eq:" + username + ")])"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("failed to fetch user ID, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Users []struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		} `json:"result"`
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(result.Users) == 0 {
+		return 0, fmt.Errorf("user %s not found", username)
+	}
+
+	return result.Users[0].ID, nil
+}
+
+
+// GetAllDatasets fetches all datasets from Superset
+func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
+	endpoint := "/api/v1/dataset/"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch datasets from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Result []map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
+
 // rawRoleModel represents a raw role model in the Superset client.
 type rawRoleModel struct {
 	ID   int64  `json:"id"`
