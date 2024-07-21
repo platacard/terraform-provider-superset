@@ -791,7 +791,7 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 	return nil
 }
 
-// CreateDataset creates a new dataset in Superset
+// CreateDataset creates a new dataset in Superset.
 func (c *Client) CreateDataset(payload map[string]interface{}) (map[string]interface{}, error) {
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
@@ -823,7 +823,7 @@ func (c *Client) CreateDataset(payload map[string]interface{}) (map[string]inter
 	return result, nil
 }
 
-// GetUserIDByName fetches the user ID by username from the Superset instance
+// GetUserIDByName fetches the user ID by username from the Superset instance.
 func (c *Client) GetUserIDByName(username string) (int64, error) {
 	endpoint := "/api/v1/users?q=(filters:[(username:eq:" + username + ")])"
 	resp, err := c.DoRequest("GET", endpoint, nil)
@@ -855,7 +855,7 @@ func (c *Client) GetUserIDByName(username string) (int64, error) {
 	return result.Users[0].ID, nil
 }
 
-// GetAllDatasets fetches all datasets from Superset
+// GetAllDatasets fetches all datasets from Superset.
 func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
 	endpoint := "/api/v1/dataset/"
 	resp, err := c.DoRequest("GET", endpoint, nil)
