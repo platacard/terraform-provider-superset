@@ -855,7 +855,6 @@ func (c *Client) GetUserIDByName(username string) (int64, error) {
 	return result.Users[0].ID, nil
 }
 
-
 // GetAllDatasets fetches all datasets from Superset
 func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
 	endpoint := "/api/v1/dataset/"
@@ -879,7 +878,6 @@ func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
 
 	return result.Result, nil
 }
-
 
 // rawRoleModel represents a raw role model in the Superset client.
 type rawRoleModel struct {
