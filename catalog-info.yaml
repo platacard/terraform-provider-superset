@@ -1,0 +1,15 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  namespace: default
+  name: terraform-provider-superset
+  title: Terraform Provider Superset
+  description: Terraform provider to manage Apache Superset Server resources
+  links:
+    - title: Terraform Registry
+      url: https://registry.terraform.io/providers/platacard/superset/latest
+      icon: terraform
+spec:
+  type: library
+  owner: group:default/devops
+  lifecycle: production
