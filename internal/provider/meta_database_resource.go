@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -84,6 +85,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Whether to expose this connection in SQL Lab.",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(true),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -92,6 +94,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Allow CREATE TABLE AS queries.",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -100,6 +103,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Allow CREATE VIEW AS queries.",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -108,6 +112,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Allow DML queries (INSERT, UPDATE, DELETE).",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -116,6 +121,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Allow asynchronous query execution.",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(true),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -124,6 +130,7 @@ func (r *metaDatabaseResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Whether this connection is managed externally.",
 				Optional:    true,
 				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
