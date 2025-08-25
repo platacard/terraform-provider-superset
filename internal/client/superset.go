@@ -809,3 +809,217 @@ type Role struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 }
+
+// MetaDatabase represents a meta database connection in Superset.
+type MetaDatabase struct {
+	ID                    int64    `json:"id"`
+	DatabaseName          string   `json:"database_name"`
+	Engine                string   `json:"engine"`
+	ConfigurationMethod   string   `json:"configuration_method"`
+	SqlalchemyURI        string   `json:"sqlalchemy_uri"`
+	ExposeInSqllab       bool     `json:"expose_in_sqllab"`
+	AllowCtas            bool     `json:"allow_ctas"`
+	AllowCvas            bool     `json:"allow_cvas"`
+	AllowDml             bool     `json:"allow_dml"`
+	AllowRunAsync        bool     `json:"allow_run_async"`
+	Extra                string   `json:"extra"`
+	ServerCert           *string  `json:"server_cert"`
+	IsManagedExternally  bool     `json:"is_managed_externally"`
+	ExternalURL          *string  `json:"external_url"`
+	AllowedDBs           []string `json:"-"` // Helper field for allowed databases
+}
+
+// CreateMetaDatabase creates a meta database connection in Superset.
+// It takes a MetaDatabase struct and returns the created database ID and an error.
+func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return 0, err
+	}
+
+	// Build extra JSON with allowed_dbs
+	extraData := map[string]interface{}{
+		"metadata_params": map[string]interface{}{},
+		"engine_params": map[string]interface{}{
+			"allowed_dbs": metaDB.AllowedDBs,
+		},
+		"metadata_cache_timeout":           map[string]interface{}{},
+		"schemas_allowed_for_csv_upload": []string{},
+	}
+	extraJSON, err := json.Marshal(extraData)
+	if err != nil {
+		return 0, err
+	}
+
+	payload := map[string]interface{}{
+		"database_name":          metaDB.DatabaseName,
+		"engine":                metaDB.Engine,
+		"configuration_method":   metaDB.ConfigurationMethod,
+		"sqlalchemy_uri":        metaDB.SqlalchemyURI,
+		"expose_in_sqllab":      metaDB.ExposeInSqllab,
+		"allow_ctas":            metaDB.AllowCtas,
+		"allow_cvas":            metaDB.AllowCvas,
+		"allow_dml":             metaDB.AllowDml,
+		"allow_run_async":       metaDB.AllowRunAsync,
+		"extra":                 string(extraJSON),
+		"server_cert":           metaDB.ServerCert,
+		"is_managed_externally": metaDB.IsManagedExternally,
+		"external_url":          metaDB.ExternalURL,
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/database/", payload, headers, cookies)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to create meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	id, ok := result["id"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("failed to retrieve meta database ID from response")
+	}
+
+	return int64(id), nil
+}
+
+// GetMetaDatabase retrieves a meta database by its ID from the Superset API.
+func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
+	endpoint := fmt.Sprintf("/api/v1/database/%d", id)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result MetaDatabase `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	metaDB := &result.Result
+	
+	// Parse allowed_dbs from extra field
+	if metaDB.Extra != "" {
+		var extraData map[string]interface{}
+		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil {
+			if engineParams, ok := extraData["engine_params"].(map[string]interface{}); ok {
+				if allowedDBs, ok := engineParams["allowed_dbs"].([]interface{}); ok {
+					metaDB.AllowedDBs = make([]string, len(allowedDBs))
+					for i, db := range allowedDBs {
+						if dbStr, ok := db.(string); ok {
+							metaDB.AllowedDBs[i] = dbStr
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return metaDB, nil
+}
+
+// UpdateMetaDatabase updates a meta database with the given ID.
+func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	// Build extra JSON with allowed_dbs
+	extraData := map[string]interface{}{
+		"metadata_params": map[string]interface{}{},
+		"engine_params": map[string]interface{}{
+			"allowed_dbs": metaDB.AllowedDBs,
+		},
+		"metadata_cache_timeout":           map[string]interface{}{},
+		"schemas_allowed_for_csv_upload": []string{},
+	}
+	extraJSON, err := json.Marshal(extraData)
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]interface{}{
+		"database_name":          metaDB.DatabaseName,
+		"engine":                metaDB.Engine,
+		"configuration_method":   metaDB.ConfigurationMethod,
+		"sqlalchemy_uri":        metaDB.SqlalchemyURI,
+		"expose_in_sqllab":      metaDB.ExposeInSqllab,
+		"allow_ctas":            metaDB.AllowCtas,
+		"allow_cvas":            metaDB.AllowCvas,
+		"allow_dml":             metaDB.AllowDml,
+		"allow_run_async":       metaDB.AllowRunAsync,
+		"extra":                 string(extraJSON),
+		"server_cert":           metaDB.ServerCert,
+		"is_managed_externally": metaDB.IsManagedExternally,
+		"external_url":          metaDB.ExternalURL,
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", fmt.Sprintf("/api/v1/database/%d", id), payload, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteMetaDatabase deletes a meta database with the given ID.
+func (c *Client) DeleteMetaDatabase(id int64) error {
+	return c.DeleteDatabase(id) // Reuse existing delete method
+}
+
+// FindMetaDatabaseByName finds a meta database by name and sqlalchemy_uri = "superset://".
+// Returns the meta database if found, nil if not found, error if search failed.
+func (c *Client) FindMetaDatabaseByName(databaseName string) (*MetaDatabase, error) {
+	allDBs, err := c.GetAllDatabases()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, db := range allDBs {
+		// Check if it's a meta database with matching name
+		if dbName, ok := db["database_name"].(string); ok && dbName == databaseName {
+			if sqlalchemyURI, ok := db["sqlalchemy_uri"].(string); ok && sqlalchemyURI == "superset://" {
+				if dbID, ok := db["id"].(float64); ok {
+					return c.GetMetaDatabase(int64(dbID))
+				}
+			}
+		}
+	}
+	
+	return nil, nil // Not found
+}
