@@ -11,13 +11,13 @@ import (
 func TestAccMetaDatabaseResource(t *testing.T) {
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
-	
+
 	// Clear any existing responders to avoid conflicts
 	httpmock.Reset()
 
 	// Define responses that change based on request context
 	var currentState string = "initial"
-	
+
 	// Mock the Superset API login response
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
@@ -172,8 +172,8 @@ func TestAccMetaDatabaseResource(t *testing.T) {
 func TestAccMetaDatabaseResourceExisting(t *testing.T) {
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
-	
-	// Clear any existing responders to avoid conflicts  
+
+	// Clear any existing responders to avoid conflicts
 	httpmock.Reset()
 
 	// Mock the Superset API login response
@@ -280,7 +280,7 @@ func TestAccMetaDatabaseResourceExisting(t *testing.T) {
 func TestAccMetaDatabaseResourceDefaults(t *testing.T) {
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
-	
+
 	// Clear any existing responders to avoid conflicts
 	httpmock.Reset()
 
@@ -316,7 +316,7 @@ func TestAccMetaDatabaseResourceDefaults(t *testing.T) {
 			"extra": "{\"metadata_params\": {}, \"engine_params\": {\"allowed_dbs\": [\"minimal_db\"]}, \"metadata_cache_timeout\": {}, \"schemas_allowed_for_csv_upload\": []}"
 		}
 	}`
-	
+
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/database/",
 		httpmock.NewStringResponder(201, defaultsResponse))
 

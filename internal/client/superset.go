@@ -812,21 +812,21 @@ type Role struct {
 
 // MetaDatabase represents a meta database connection in Superset.
 type MetaDatabase struct {
-	ID                    int64    `json:"id"`
-	DatabaseName          string   `json:"database_name"`
-	Engine                string   `json:"engine"`
-	ConfigurationMethod   string   `json:"configuration_method"`
-	SqlalchemyURI        string   `json:"sqlalchemy_uri"`
-	ExposeInSqllab       bool     `json:"expose_in_sqllab"`
-	AllowCtas            bool     `json:"allow_ctas"`
-	AllowCvas            bool     `json:"allow_cvas"`
-	AllowDml             bool     `json:"allow_dml"`
-	AllowRunAsync        bool     `json:"allow_run_async"`
-	Extra                string   `json:"extra"`
-	ServerCert           *string  `json:"server_cert"`
-	IsManagedExternally  bool     `json:"is_managed_externally"`
-	ExternalURL          *string  `json:"external_url"`
-	AllowedDBs           []string `json:"-"` // Helper field for allowed databases
+	ID                  int64    `json:"id"`
+	DatabaseName        string   `json:"database_name"`
+	Engine              string   `json:"engine"`
+	ConfigurationMethod string   `json:"configuration_method"`
+	SqlalchemyURI       string   `json:"sqlalchemy_uri"`
+	ExposeInSqllab      bool     `json:"expose_in_sqllab"`
+	AllowCtas           bool     `json:"allow_ctas"`
+	AllowCvas           bool     `json:"allow_cvas"`
+	AllowDml            bool     `json:"allow_dml"`
+	AllowRunAsync       bool     `json:"allow_run_async"`
+	Extra               string   `json:"extra"`
+	ServerCert          *string  `json:"server_cert"`
+	IsManagedExternally bool     `json:"is_managed_externally"`
+	ExternalURL         *string  `json:"external_url"`
+	AllowedDBs          []string `json:"-"` // Helper field for allowed databases
 }
 
 // CreateMetaDatabase creates a meta database connection in Superset.
@@ -843,7 +843,7 @@ func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
 		"engine_params": map[string]interface{}{
 			"allowed_dbs": metaDB.AllowedDBs,
 		},
-		"metadata_cache_timeout":           map[string]interface{}{},
+		"metadata_cache_timeout":         map[string]interface{}{},
 		"schemas_allowed_for_csv_upload": []string{},
 	}
 	extraJSON, err := json.Marshal(extraData)
@@ -852,9 +852,9 @@ func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
 	}
 
 	payload := map[string]interface{}{
-		"database_name":          metaDB.DatabaseName,
+		"database_name":         metaDB.DatabaseName,
 		"engine":                metaDB.Engine,
-		"configuration_method":   metaDB.ConfigurationMethod,
+		"configuration_method":  metaDB.ConfigurationMethod,
 		"sqlalchemy_uri":        metaDB.SqlalchemyURI,
 		"expose_in_sqllab":      metaDB.ExposeInSqllab,
 		"allow_ctas":            metaDB.AllowCtas,
@@ -920,7 +920,7 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 	}
 
 	metaDB := &result.Result
-	
+
 	// Parse allowed_dbs from extra field
 	if metaDB.Extra != "" {
 		var extraData map[string]interface{}
@@ -954,7 +954,7 @@ func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
 		"engine_params": map[string]interface{}{
 			"allowed_dbs": metaDB.AllowedDBs,
 		},
-		"metadata_cache_timeout":           map[string]interface{}{},
+		"metadata_cache_timeout":         map[string]interface{}{},
 		"schemas_allowed_for_csv_upload": []string{},
 	}
 	extraJSON, err := json.Marshal(extraData)
@@ -963,9 +963,9 @@ func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
 	}
 
 	payload := map[string]interface{}{
-		"database_name":          metaDB.DatabaseName,
+		"database_name":         metaDB.DatabaseName,
 		"engine":                metaDB.Engine,
-		"configuration_method":   metaDB.ConfigurationMethod,
+		"configuration_method":  metaDB.ConfigurationMethod,
 		"sqlalchemy_uri":        metaDB.SqlalchemyURI,
 		"expose_in_sqllab":      metaDB.ExposeInSqllab,
 		"allow_ctas":            metaDB.AllowCtas,
@@ -1020,6 +1020,6 @@ func (c *Client) FindMetaDatabaseByName(databaseName string) (*MetaDatabase, err
 			}
 		}
 	}
-	
+
 	return nil, nil // Not found
 }

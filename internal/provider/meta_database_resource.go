@@ -202,7 +202,7 @@ func (r *metaDatabaseResource) Create(ctx context.Context, req resource.CreateRe
 		})
 
 		metaDB = &client.MetaDatabase{
-			DatabaseName:         plan.DatabaseName.ValueString(),
+			DatabaseName:        plan.DatabaseName.ValueString(),
 			Engine:              "superset",
 			ConfigurationMethod: "sqlalchemy_form",
 			SqlalchemyURI:       sqlalchemyURI,
@@ -245,14 +245,14 @@ func (r *metaDatabaseResource) Create(ctx context.Context, req resource.CreateRe
 			)
 			return
 		}
-		
+
 		id = existingDB.ID
 	} else {
 		// Create new meta database
 		tflog.Debug(ctx, "Creating new meta database")
 
 		metaDB = &client.MetaDatabase{
-			DatabaseName:         plan.DatabaseName.ValueString(),
+			DatabaseName:        plan.DatabaseName.ValueString(),
 			Engine:              "superset",
 			ConfigurationMethod: "sqlalchemy_form",
 			SqlalchemyURI:       sqlalchemyURI,
@@ -372,13 +372,13 @@ func (r *metaDatabaseResource) Read(ctx context.Context, req resource.ReadReques
 	// Update state with current values from Superset
 	state.ID = types.Int64Value(metaDB.ID)
 	state.DatabaseName = types.StringValue(metaDB.DatabaseName)
-	
+
 	// Only update sqlalchemy_uri if API returned a non-empty value
 	if metaDB.SqlalchemyURI != "" {
 		state.SqlalchemyURI = types.StringValue(metaDB.SqlalchemyURI)
 	}
 	// If API doesn't return sqlalchemy_uri, keep the existing value in state
-	
+
 	state.ExposeInSqllab = types.BoolValue(metaDB.ExposeInSqllab)
 	state.AllowCtas = types.BoolValue(metaDB.AllowCtas)
 	state.AllowCvas = types.BoolValue(metaDB.AllowCvas)
@@ -425,7 +425,7 @@ func (r *metaDatabaseResource) Update(ctx context.Context, req resource.UpdateRe
 	}
 
 	metaDB := &client.MetaDatabase{
-		DatabaseName:         plan.DatabaseName.ValueString(),
+		DatabaseName:        plan.DatabaseName.ValueString(),
 		Engine:              "superset",
 		ConfigurationMethod: "sqlalchemy_form",
 		SqlalchemyURI:       sqlalchemyURI,
@@ -508,30 +508,30 @@ func (r *metaDatabaseResource) ImportState(ctx context.Context, req resource.Imp
 	}
 
 	tflog.Info(ctx, "ImportState: Retrieved meta database", map[string]interface{}{
-		"id":               metaDB.ID,
-		"database_name":    metaDB.DatabaseName,
-		"sqlalchemy_uri":   metaDB.SqlalchemyURI,
-		"allowed_dbs_len":  len(metaDB.AllowedDBs),
-		"allowed_dbs":      metaDB.AllowedDBs,
+		"id":              metaDB.ID,
+		"database_name":   metaDB.DatabaseName,
+		"sqlalchemy_uri":  metaDB.SqlalchemyURI,
+		"allowed_dbs_len": len(metaDB.AllowedDBs),
+		"allowed_dbs":     metaDB.AllowedDBs,
 	})
 
 	// Set all attributes
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("database_name"), metaDB.DatabaseName)...)
-	
+
 	// Set sqlalchemy_uri with default for meta databases
 	if metaDB.SqlalchemyURI == "" {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("sqlalchemy_uri"), "superset://")...)
 	} else {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("sqlalchemy_uri"), metaDB.SqlalchemyURI)...)
 	}
-	
+
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("expose_in_sqllab"), metaDB.ExposeInSqllab)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_ctas"), metaDB.AllowCtas)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_cvas"), metaDB.AllowCvas)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_dml"), metaDB.AllowDml)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_run_async"), metaDB.AllowRunAsync)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("is_managed_externally"), metaDB.IsManagedExternally)...)
-	
+
 	// Set allowed_databases - if API didn't return any, don't set it (leave as null in import)
 	// This will cause terraform to see the configured value as needing to be applied
 	if len(metaDB.AllowedDBs) > 0 {
