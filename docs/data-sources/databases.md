@@ -3,12 +3,12 @@
 page_title: "superset_databases Data Source - superset"
 subcategory: ""
 description: |-
-  Fetches the list of databases and their schemas from Superset.
+  Fetches the list of databases from Superset.
 ---
 
 # superset_databases (Data Source)
 
-Fetches the list of databases and their schemas from Superset.
+Fetches the list of databases from Superset.
 
 ## Example Usage
 
@@ -30,5 +30,3 @@ Read-Only:
 
 - `database_name` (String) Name of the database.
 - `id` (Number) Numeric identifier of the database.
-- `schemas` (List of String) List of schemas in the database.
-- `sqlalchemy_uri` (String) SQLAlchemy URI of the database.

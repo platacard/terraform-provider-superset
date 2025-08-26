@@ -34,10 +34,8 @@ type databasesDataSourceModel struct {
 
 // databaseModel maps the database schema data.
 type databaseModel struct {
-	ID            types.Int64    `tfsdk:"id"`
-	DatabaseName  types.String   `tfsdk:"database_name"`
-	Schemas       []types.String `tfsdk:"schemas"`
-	SQLAlchemyURI types.String   `tfsdk:"sqlalchemy_uri"`
+	ID           types.Int64  `tfsdk:"id"`
+	DatabaseName types.String `tfsdk:"database_name"`
 }
 
 // Metadata returns the data source type name.
@@ -53,7 +51,7 @@ func (d *databasesDataSource) Metadata(ctx context.Context, req datasource.Metad
 func (d *databasesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	tflog.Debug(ctx, "Starting Schema method")
 	resp.Schema = schema.Schema{
-		Description: "Fetches the list of databases and their schemas from Superset.",
+		Description: "Fetches the list of databases from Superset.",
 		Attributes: map[string]schema.Attribute{
 			"databases": schema.ListNestedAttribute{
 				Description: "List of databases.",
@@ -66,15 +64,6 @@ func (d *databasesDataSource) Schema(ctx context.Context, req datasource.SchemaR
 						},
 						"database_name": schema.StringAttribute{
 							Description: "Name of the database.",
-							Computed:    true,
-						},
-						"schemas": schema.ListAttribute{
-							Description: "List of schemas in the database.",
-							Computed:    true,
-							ElementType: types.StringType,
-						},
-						"sqlalchemy_uri": schema.StringAttribute{
-							Description: "SQLAlchemy URI of the database.",
 							Computed:    true,
 						},
 					},
@@ -91,26 +80,14 @@ func (d *databasesDataSource) Read(ctx context.Context, req datasource.ReadReque
 
 	var state databasesDataSourceModel
 
-	dbInfos, err := d.client.GetDatabasesInfos()
+	dbInfosRaw, err := d.client.GetAllDatabases()
 	if err != nil {
-		tflog.Error(ctx, "Error fetching database infos", map[string]interface{}{
+		tflog.Error(ctx, "Error fetching databases", map[string]interface{}{
 			"error": err.Error(),
 		})
 		resp.Diagnostics.AddError(
 			"Unable to Read Superset Databases",
 			err.Error(),
-		)
-		return
-	}
-
-	dbInfosRaw, ok := dbInfos["databases"].([]map[string]interface{})
-	if !ok {
-		tflog.Error(ctx, "Type assertion error for databases", map[string]interface{}{
-			"databases_type": fmt.Sprintf("%T", dbInfos["databases"]),
-		})
-		resp.Diagnostics.AddError(
-			"Type Assertion Error",
-			fmt.Sprintf("Expected []map[string]interface{} for databases, got: %T", dbInfos["databases"]),
 		)
 		return
 	}
@@ -149,55 +126,9 @@ func (d *databasesDataSource) Read(ctx context.Context, req datasource.ReadReque
 			return
 		}
 
-		sqlalchemyURI, ok := db["sqlalchemy_uri"].(string)
-		if !ok {
-			tflog.Error(ctx, "Type assertion error for SQLAlchemy URI", map[string]interface{}{
-				"sqlalchemy_uri_type": fmt.Sprintf("%T", db["sqlalchemy_uri"]),
-			})
-			resp.Diagnostics.AddError(
-				"Type Assertion Error",
-				fmt.Sprintf("Expected string for SQLAlchemy URI, got: %T", db["sqlalchemy_uri"]),
-			)
-			return
-		}
-
-		var schemas []types.String
-		switch v := db["schemas"].(type) {
-		case []string:
-			for _, schema := range v {
-				schemas = append(schemas, types.StringValue(schema))
-			}
-		case []interface{}:
-			for _, schema := range v {
-				schemaStr, ok := schema.(string)
-				if !ok {
-					tflog.Error(ctx, "Type assertion error for schema", map[string]interface{}{
-						"schema_type": fmt.Sprintf("%T", schema),
-					})
-					resp.Diagnostics.AddError(
-						"Type Assertion Error",
-						fmt.Sprintf("Expected string for schema, got: %T", schema),
-					)
-					return
-				}
-				schemas = append(schemas, types.StringValue(schemaStr))
-			}
-		default:
-			tflog.Error(ctx, "Unexpected type for schemas", map[string]interface{}{
-				"schemas_type": fmt.Sprintf("%T", db["schemas"]),
-			})
-			resp.Diagnostics.AddError(
-				"Type Assertion Error",
-				fmt.Sprintf("Expected []string or []interface{} for schemas, got: %T", db["schemas"]),
-			)
-			return
-		}
-
 		state.Databases = append(state.Databases, databaseModel{
-			ID:            types.Int64Value(id),
-			DatabaseName:  types.StringValue(name),
-			Schemas:       schemas,
-			SQLAlchemyURI: types.StringValue(sqlalchemyURI),
+			ID:           types.Int64Value(id),
+			DatabaseName: types.StringValue(name),
 		})
 	}
 
