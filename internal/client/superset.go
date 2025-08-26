@@ -12,9 +12,9 @@ import (
 
 // Global cache for GetAllDatabases to avoid multiple API calls across different client instances
 var (
-	globalDatabasesCache []map[string]interface{}
-	globalDatabasesCacheTime time.Time
-	globalDatabasesCacheTTL = 5 * time.Minute // Cache for 5 minutes
+	globalDatabasesCache      []map[string]interface{}
+	globalDatabasesCacheTime  time.Time
+	globalDatabasesCacheTTL   = 5 * time.Minute // Cache for 5 minutes
 	globalDatabasesCacheMutex sync.RWMutex
 )
 
@@ -637,24 +637,24 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 	// Check global cache first (read lock)
 	globalDatabasesCacheMutex.RLock()
 	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
-		fmt.Printf("DEBUG GetAllDatabases: Using global cached result with %d databases (age: %v)\n", 
+		fmt.Printf("DEBUG GetAllDatabases: Using global cached result with %d databases (age: %v)\n",
 			len(globalDatabasesCache), time.Since(globalDatabasesCacheTime))
 		result := globalDatabasesCache
 		globalDatabasesCacheMutex.RUnlock()
 		return result, nil
 	}
 	globalDatabasesCacheMutex.RUnlock()
-	
+
 	// Need to fetch data - acquire write lock
 	globalDatabasesCacheMutex.Lock()
 	defer globalDatabasesCacheMutex.Unlock()
-	
+
 	// Double-check in case another goroutine already fetched while we were waiting
 	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
 		fmt.Printf("DEBUG GetAllDatabases: Using global cached result (double-check) with %d databases\n", len(globalDatabasesCache))
 		return globalDatabasesCache, nil
 	}
-	
+
 	endpoint := "/api/v1/database/?q=(page_size:1700)"
 	fmt.Printf("DEBUG GetAllDatabases: Making API call to %s\n", endpoint)
 	resp, err := c.DoRequest("GET", endpoint, nil)
@@ -678,7 +678,7 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 	// Cache the result globally
 	globalDatabasesCache = result.Result
 	globalDatabasesCacheTime = time.Now()
-	
+
 	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(result.Result))
 	return result.Result, nil
 }
@@ -693,7 +693,13 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	}
 	databasesList := []map[string]interface{}{}
 
-	for _, db := range databasesInfo {
+	// Process only first 20 databases to avoid performance issues
+	limit := 100
+	if len(databasesInfo) < limit {
+		limit = len(databasesInfo)
+	}
+
+	for _, db := range databasesInfo[:limit] {
 		dbID, ok := db["id"].(float64)
 		if !ok {
 			continue

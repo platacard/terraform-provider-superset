@@ -6,3 +6,4 @@ FEATURES:
 IMPROVEMENTS:
 * Added comprehensive test coverage for meta database resource
 * Added schema-level default values for boolean attributes
+* Added global caching for database API calls to improve performance across multiple client instances
