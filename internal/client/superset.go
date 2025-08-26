@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Global cache for GetAllDatabases to avoid multiple API calls across different client instances
+// Global cache for GetAllDatabases to avoid multiple API calls across different client instances.
 var (
 	globalDatabasesCache      []map[string]interface{}
 	globalDatabasesCacheTime  time.Time
