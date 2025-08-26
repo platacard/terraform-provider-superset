@@ -6,6 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
+)
+
+// Global cache for GetAllDatabases to avoid multiple API calls across different client instances
+var (
+	globalDatabasesCache []map[string]interface{}
+	globalDatabasesCacheTime time.Time
+	globalDatabasesCacheTTL = 5 * time.Minute // Cache for 5 minutes
+	globalDatabasesCacheMutex sync.RWMutex
 )
 
 // Client represents a client for Superset API.
@@ -622,9 +632,31 @@ func (c *Client) GetDatabaseConnectionByID(databaseID int64) (map[string]interfa
 	return result, nil
 }
 
-// GetAllDatabases retrieves all databases from Superset.
+// GetAllDatabases retrieves all databases from Superset with global caching.
 func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
-	endpoint := "/api/v1/database/"
+	// Check global cache first (read lock)
+	globalDatabasesCacheMutex.RLock()
+	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
+		fmt.Printf("DEBUG GetAllDatabases: Using global cached result with %d databases (age: %v)\n", 
+			len(globalDatabasesCache), time.Since(globalDatabasesCacheTime))
+		result := globalDatabasesCache
+		globalDatabasesCacheMutex.RUnlock()
+		return result, nil
+	}
+	globalDatabasesCacheMutex.RUnlock()
+	
+	// Need to fetch data - acquire write lock
+	globalDatabasesCacheMutex.Lock()
+	defer globalDatabasesCacheMutex.Unlock()
+	
+	// Double-check in case another goroutine already fetched while we were waiting
+	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
+		fmt.Printf("DEBUG GetAllDatabases: Using global cached result (double-check) with %d databases\n", len(globalDatabasesCache))
+		return globalDatabasesCache, nil
+	}
+	
+	endpoint := "/api/v1/database/?q=(page_size:1700)"
+	fmt.Printf("DEBUG GetAllDatabases: Making API call to %s\n", endpoint)
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -643,6 +675,11 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
+	// Cache the result globally
+	globalDatabasesCache = result.Result
+	globalDatabasesCacheTime = time.Now()
+	
+	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(result.Result))
 	return result.Result, nil
 }
 
@@ -921,22 +958,68 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 
 	metaDB := &result.Result
 
+	// For debugging, also try to get full database info from list endpoint
+	fmt.Printf("DEBUG GetMetaDatabase: Trying to get extra field from list endpoint for ID %d\n", id)
+	allDBs, listErr := c.GetAllDatabases()
+	if listErr == nil {
+		fmt.Printf("DEBUG GetMetaDatabase: Successfully got %d databases from list endpoint\n", len(allDBs))
+		found := false
+		for _, db := range allDBs {
+			if dbIDFloat, ok := db["id"].(float64); ok && int64(dbIDFloat) == id {
+				found = true
+				fmt.Printf("DEBUG GetMetaDatabase: Found matching database in list: %+v\n", db)
+				if extraStr, ok := db["extra"].(string); ok {
+					if extraStr != "" {
+						fmt.Printf("DEBUG GetMetaDatabase: Found extra field from list endpoint: %q\n", extraStr)
+						metaDB.Extra = extraStr
+					} else {
+						fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty even in list endpoint\n")
+					}
+				} else {
+					fmt.Printf("DEBUG GetMetaDatabase: No extra field found in list endpoint response\n")
+				}
+				break
+			}
+		}
+		if !found {
+			fmt.Printf("DEBUG GetMetaDatabase: Database ID %d not found in list of %d databases\n", id, len(allDBs))
+		}
+	} else {
+		fmt.Printf("DEBUG GetMetaDatabase: Failed to get from list endpoint: %v\n", listErr)
+	}
+
 	// Parse allowed_dbs from extra field
+	fmt.Printf("DEBUG GetMetaDatabase: Raw extra field = %q\n", metaDB.Extra)
 	if metaDB.Extra != "" {
 		var extraData map[string]interface{}
 		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil {
+			fmt.Printf("DEBUG GetMetaDatabase: Parsed extraData = %+v\n", extraData)
 			if engineParams, ok := extraData["engine_params"].(map[string]interface{}); ok {
+				fmt.Printf("DEBUG GetMetaDatabase: Found engine_params = %+v\n", engineParams)
 				if allowedDBs, ok := engineParams["allowed_dbs"].([]interface{}); ok {
+					fmt.Printf("DEBUG GetMetaDatabase: Found allowed_dbs = %+v (length: %d)\n", allowedDBs, len(allowedDBs))
 					metaDB.AllowedDBs = make([]string, len(allowedDBs))
 					for i, db := range allowedDBs {
 						if dbStr, ok := db.(string); ok {
 							metaDB.AllowedDBs[i] = dbStr
+							fmt.Printf("DEBUG GetMetaDatabase: Added allowed_db[%d] = %q\n", i, dbStr)
+						} else {
+							fmt.Printf("DEBUG GetMetaDatabase: Failed to convert allowed_db[%d] to string: %+v (type: %T)\n", i, db, db)
 						}
 					}
+				} else {
+					fmt.Printf("DEBUG GetMetaDatabase: No 'allowed_dbs' found in engine_params\n")
 				}
+			} else {
+				fmt.Printf("DEBUG GetMetaDatabase: No 'engine_params' found in extraData\n")
 			}
+		} else {
+			fmt.Printf("DEBUG GetMetaDatabase: Failed to unmarshal extra field as JSON: %v\n", err)
 		}
+	} else {
+		fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty\n")
 	}
+	fmt.Printf("DEBUG GetMetaDatabase: Final AllowedDBs = %+v (length: %d)\n", metaDB.AllowedDBs, len(metaDB.AllowedDBs))
 
 	return metaDB, nil
 }

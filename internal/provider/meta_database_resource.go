@@ -386,14 +386,31 @@ func (r *metaDatabaseResource) Read(ctx context.Context, req resource.ReadReques
 	state.AllowRunAsync = types.BoolValue(metaDB.AllowRunAsync)
 	state.IsManagedExternally = types.BoolValue(metaDB.IsManagedExternally)
 
+	// Debug current state before updating
+	tflog.Info(ctx, "DEBUG Read: Current state before allowed_databases update", map[string]interface{}{
+		"current_state_allowed_databases": state.AllowedDatabases.String(),
+		"api_returned_allowed_dbs": metaDB.AllowedDBs,
+		"api_returned_length": len(metaDB.AllowedDBs),
+	})
+
 	// Only update allowed_databases if API returned non-empty list
 	if len(metaDB.AllowedDBs) > 0 {
+		tflog.Info(ctx, "DEBUG Read: Updating allowed_databases from API", map[string]interface{}{
+			"api_allowed_dbs": metaDB.AllowedDBs,
+		})
 		allowedDBsList, diags := types.ListValueFrom(ctx, types.StringType, metaDB.AllowedDBs)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		state.AllowedDatabases = allowedDBsList
+		tflog.Info(ctx, "DEBUG Read: Successfully updated allowed_databases", map[string]interface{}{
+			"new_state_allowed_databases": state.AllowedDatabases.String(),
+		})
+	} else {
+		tflog.Warn(ctx, "DEBUG Read: API returned empty allowed_dbs, keeping existing state", map[string]interface{}{
+			"existing_state_allowed_databases": state.AllowedDatabases.String(),
+		})
 	}
 	// If API doesn't return allowed_databases, keep the existing value in state
 
