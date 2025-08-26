@@ -389,8 +389,8 @@ func (r *metaDatabaseResource) Read(ctx context.Context, req resource.ReadReques
 	// Debug current state before updating
 	tflog.Info(ctx, "DEBUG Read: Current state before allowed_databases update", map[string]interface{}{
 		"current_state_allowed_databases": state.AllowedDatabases.String(),
-		"api_returned_allowed_dbs": metaDB.AllowedDBs,
-		"api_returned_length": len(metaDB.AllowedDBs),
+		"api_returned_allowed_dbs":        metaDB.AllowedDBs,
+		"api_returned_length":             len(metaDB.AllowedDBs),
 	})
 
 	// Only update allowed_databases if API returned non-empty list

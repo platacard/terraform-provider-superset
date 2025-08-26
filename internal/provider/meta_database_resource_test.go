@@ -215,6 +215,26 @@ func TestAccMetaDatabaseResourceExisting(t *testing.T) {
 			}
 		}`))
 
+	// Mock the create call for new meta database (since this test creates, not imports)
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/database/",
+		httpmock.NewStringResponder(201, `{
+			"id": 351,
+			"result": {
+				"id": 351,
+				"database_name": "ExistingMetaConnection",
+				"engine": "superset",
+				"configuration_method": "sqlalchemy_form",
+				"sqlalchemy_uri": "superset://",
+				"expose_in_sqllab": true,
+				"allow_ctas": false,
+				"allow_cvas": false,
+				"allow_dml": false,
+				"allow_run_async": true,
+				"is_managed_externally": false,
+				"extra": "{\"metadata_params\": {}, \"engine_params\": {\"allowed_dbs\": [\"new_db1\", \"new_db2\"]}, \"metadata_cache_timeout\": {}, \"schemas_allowed_for_csv_upload\": []}"
+			}
+		}`))
+
 	// Mock the update call for the existing meta database
 	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/database/351",
 		httpmock.NewStringResponder(200, `{

@@ -693,7 +693,7 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	}
 	databasesList := []map[string]interface{}{}
 
-	// Process only first 20 databases to avoid performance issues
+	// Process only first 100 databases to avoid performance issues
 	limit := 100
 	if len(databasesInfo) < limit {
 		limit = len(databasesInfo)
