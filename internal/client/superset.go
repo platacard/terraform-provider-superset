@@ -834,6 +834,30 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 	return nil
 }
 
+// GetAllDatasets fetches all datasets from Superset.
+func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
+	endpoint := "/api/v1/dataset/?q=(page_size:5000)"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch datasets from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Result []map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
 // rawRoleModel represents a raw role model in the Superset client.
 type rawRoleModel struct {
 	ID   int64  `json:"id"`
