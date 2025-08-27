@@ -655,7 +655,7 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 		return globalDatabasesCache, nil
 	}
 
-	endpoint := "/api/v1/database/?q=(page_size:1700)"
+	endpoint := "/api/v1/database/?q=(page_size:5000)"
 	fmt.Printf("DEBUG GetAllDatabases: Making API call to %s\n", endpoint)
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
