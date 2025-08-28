@@ -858,6 +858,166 @@ func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
 	return result.Result, nil
 }
 
+// DatasetRequest represents the request structure for creating/updating a dataset.
+type DatasetRequest struct {
+	TableName string `json:"table_name"`
+	Database  int64  `json:"database"`
+	Schema    string `json:"schema,omitempty"`
+	SQL       string `json:"sql,omitempty"`
+}
+
+// CreateDataset creates a new dataset in Superset.
+func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{}, error) {
+	endpoint := "/api/v1/dataset/"
+
+	// Debug: log the request payload
+	fmt.Printf("DEBUG CreateDataset: Sending request to %s with payload: %+v\n", endpoint, dataset)
+
+	resp, err := c.DoRequest("POST", endpoint, dataset)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to create dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// ClearGlobalDatabaseCache clears the global database cache (useful for tests).
+func ClearGlobalDatabaseCache() {
+	globalDatabasesCacheMutex.Lock()
+	defer globalDatabasesCacheMutex.Unlock()
+	globalDatabasesCache = nil
+	globalDatabasesCacheTime = time.Time{}
+	fmt.Printf("DEBUG ClearGlobalDatabaseCache: Global database cache cleared\n")
+}
+
+// GetDataset fetches a specific dataset by ID.
+func (c *Client) GetDataset(id int64) (*map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("dataset with ID %d not found", id)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result.Result, nil
+}
+
+// DatasetUpdateRequest represents the request structure for updating a dataset (excludes database field).
+type DatasetUpdateRequest struct {
+	TableName string `json:"table_name"`
+	Schema    string `json:"schema,omitempty"`
+	SQL       string `json:"sql,omitempty"`
+}
+
+// UpdateDataset updates an existing dataset (database field cannot be changed).
+func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
+	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
+
+	updateReq := DatasetUpdateRequest{
+		TableName: tableName,
+		Schema:    schema,
+		SQL:       sql,
+	}
+
+	// Debug: log the update request payload
+	fmt.Printf("DEBUG UpdateDataset: Sending UPDATE request to %s with payload: %+v\n", endpoint, updateReq)
+
+	resp, err := c.DoRequest("PUT", endpoint, updateReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteDataset deletes a dataset by ID.
+func (c *Client) DeleteDataset(id int64) error {
+	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
+	resp, err := c.DoRequest("DELETE", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// GetDatabaseIDByName finds database ID by name using cached database list.
+func (c *Client) GetDatabaseIDByName(databaseName string) (int64, error) {
+	databases, err := c.GetAllDatabases()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch databases: %w", err)
+	}
+
+	for _, db := range databases {
+		if name, ok := db["database_name"].(string); ok && name == databaseName {
+			if id, ok := db["id"].(float64); ok {
+				return int64(id), nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("database with name '%s' not found", databaseName)
+}
+
+// GetDatabaseNameByID finds database name by ID using cached database list.
+func (c *Client) GetDatabaseNameByID(databaseID int64) (string, error) {
+	databases, err := c.GetAllDatabases()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch databases: %w", err)
+	}
+
+	for _, db := range databases {
+		if id, ok := db["id"].(float64); ok && int64(id) == databaseID {
+			if name, ok := db["database_name"].(string); ok {
+				return name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("database with ID %d not found", databaseID)
+}
+
 // rawRoleModel represents a raw role model in the Superset client.
 type rawRoleModel struct {
 	ID   int64  `json:"id"`

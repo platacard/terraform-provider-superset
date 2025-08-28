@@ -210,5 +210,6 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewRolePermissionsResource, // New resource
 		NewDatabaseResource,        // New resource
 		NewMetaDatabaseResource,    // Meta database resource
+		NewDatasetResource,         // New dataset resource
 	}
 }
