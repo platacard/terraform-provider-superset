@@ -1,4 +1,4 @@
-## 0.2.0 (2025-08-25)
+## 0.2.0 (2025-08-29)
 
 FEATURES:
 * **New Resource**: `superset_meta_database` - Support for Superset meta database connections for cross-database queries
