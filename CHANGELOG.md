@@ -2,6 +2,7 @@
 
 FEATURES:
 * **New Resource**: `superset_meta_database` - Support for Superset meta database connections for cross-database queries
+* **New Resource**: `superset_dataset` - Manage individual Superset datasets
 * **New Data Source**: `superset_datasets` - Fetch all datasets from Superset 
  
 IMPROVEMENTS:
