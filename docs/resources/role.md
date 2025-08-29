@@ -34,6 +34,8 @@ resource "superset_role" "example" {
 
 Import is supported using the following syntax:
 
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
 ```shell
 # Role can be imported by specifying the numeric identifier of the role id
 terraform import superset_role.example 632
