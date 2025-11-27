@@ -252,7 +252,8 @@ func (c *Client) GetRolePermissions(roleID int64) ([]Permission, error) {
 // API to fetch the permissions resources and filters the results based on
 // the provided permissions. It returns a slice of int64 IDs that match the
 // provided permissions, or an error if the request fails or the decoding of
-// the response fails.
+// the response fails. This function handles pagination to fetch all pages of
+// permissions until all requested permissions are found.
 //
 // Parameters:
 //   - permissions: A slice of maps containing the permission and view menu names
@@ -262,49 +263,107 @@ func (c *Client) GetRolePermissions(roleID int64) ([]Permission, error) {
 // - A slice of int64 IDs that match the provided permissions.
 // - An error if the request fails or the decoding of the response fails.
 func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]int64, error) {
-	url := fmt.Sprintf("%s/api/v1/security/permissions-resources/?q=(page_size:5000)", c.Host)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Resources []struct {
-			ID         int64 `json:"id"`
-			Permission struct {
-				Name string `json:"name"`
-			} `json:"permission"`
-			ViewMenu struct {
-				Name string `json:"name"`
-			} `json:"view_menu"`
-		} `json:"result"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
+	page := 0
+	pageSize := 5000
 	var ids []int64
+	foundPermissions := make(map[string]bool)
+
+	// Create a map to track which permissions we're looking for
+	permissionsToFind := make(map[string]bool)
 	for _, perm := range permissions {
-		for _, res := range result.Resources {
-			if res.Permission.Name == perm["permission"] && res.ViewMenu.Name == perm["view_menu"] {
-				ids = append(ids, res.ID)
+		key := fmt.Sprintf("%s:%s", perm["permission"], perm["view_menu"])
+		permissionsToFind[key] = true
+	}
+
+	for {
+		endpoint := fmt.Sprintf("/api/v1/security/permissions-resources?q=(page_size:%d,page:%d)", pageSize, page)
+		url := fmt.Sprintf("%s%s", c.Host, endpoint)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			// If resp is not nil, close the body even on error
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
+		}
+
+		var result struct {
+			Resources []struct {
+				ID         int64 `json:"id"`
+				Permission struct {
+					Name string `json:"name"`
+				} `json:"permission"`
+				ViewMenu struct {
+					Name string `json:"name"`
+				} `json:"view_menu"`
+			} `json:"result"`
+			Count int `json:"count"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		// Search in current page for all requested permissions
+		for _, perm := range permissions {
+			key := fmt.Sprintf("%s:%s", perm["permission"], perm["view_menu"])
+			if foundPermissions[key] {
+				continue // Already found this permission
+			}
+
+			for _, res := range result.Resources {
+				if res.Permission.Name == perm["permission"] && res.ViewMenu.Name == perm["view_menu"] {
+					ids = append(ids, res.ID)
+					foundPermissions[key] = true
+					break
+				}
+			}
+		}
+
+		// Check if we've found all requested permissions
+		allFound := true
+		for key := range permissionsToFind {
+			if !foundPermissions[key] {
+				allFound = false
 				break
 			}
 		}
+		if allFound {
+			return ids, nil
+		}
+
+		// Check if there are more pages
+		// If count is available, use it; otherwise check if we got fewer results than pageSize
+		if result.Count > 0 {
+			if (page+1)*pageSize >= result.Count {
+				break // Last page reached
+			}
+		} else if len(result.Resources) < pageSize {
+			break // Last page reached (no more results)
+		}
+
+		// Safety check: prevent infinite loop if API doesn't provide count and returns exactly pageSize results
+		// Limit to 100 pages (500,000 permissions) which is more than enough for any realistic scenario
+		if page >= 99 {
+			break // Maximum pages reached
+		}
+
+		page++
 	}
+
 	return ids, nil
 }
 
@@ -454,6 +513,7 @@ func (c *Client) DeleteRole(id int64) error {
 // It sends a GET request to the Superset API to fetch the permissions resources and searches for the resource
 // that matches the given permission name and view menu name. If a match is found, it returns the ID of the resource.
 // If no match is found, it returns an error indicating that the permission with the given name and view menu name was not found.
+// This function handles pagination to fetch all pages of permissions until the requested permission is found.
 //
 // Parameters:
 // - permissionName: The name of the permission to search for.
@@ -463,38 +523,68 @@ func (c *Client) DeleteRole(id int64) error {
 // - int64: The ID of the permission resource if found.
 // - error: An error if the request fails or if the permission resource is not found.
 func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
-	endpoint := "/api/v1/security/permissions-resources?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
+	page := 0
+	pageSize := 5000
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Resources []struct {
-			ID         int64 `json:"id"`
-			Permission struct {
-				Name string `json:"name"`
-			} `json:"permission"`
-			ViewMenu struct {
-				Name string `json:"name"`
-			} `json:"view_menu"`
-		} `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, resource := range result.Resources {
-		if resource.Permission.Name == permissionName && resource.ViewMenu.Name == viewMenuName {
-			return resource.ID, nil
+	for {
+		endpoint := fmt.Sprintf("/api/v1/security/permissions-resources?q=(page_size:%d,page:%d)", pageSize, page)
+		resp, err := c.DoRequest("GET", endpoint, nil)
+		if err != nil {
+			// If resp is not nil, close the body even on error
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return 0, err
 		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
+		}
+
+		var result struct {
+			Resources []struct {
+				ID         int64 `json:"id"`
+				Permission struct {
+					Name string `json:"name"`
+				} `json:"permission"`
+				ViewMenu struct {
+					Name string `json:"name"`
+				} `json:"view_menu"`
+			} `json:"result"`
+			Count int `json:"count"`
+		}
+
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return 0, err
+		}
+
+		// Search in current page
+		for _, resource := range result.Resources {
+			if resource.Permission.Name == permissionName && resource.ViewMenu.Name == viewMenuName {
+				return resource.ID, nil
+			}
+		}
+
+		// Check if there are more pages
+		// If count is available, use it; otherwise check if we got fewer results than pageSize
+		if result.Count > 0 {
+			if (page+1)*pageSize >= result.Count {
+				break // Last page reached
+			}
+		} else if len(result.Resources) < pageSize {
+			break // Last page reached (no more results)
+		}
+
+		// Safety check: prevent infinite loop if API doesn't provide count and returns exactly pageSize results
+		// Limit to 100 pages (500,000 permissions) which is more than enough for any realistic scenario
+		if page >= 99 {
+			break // Maximum pages reached
+		}
+
+		page++
 	}
 
 	return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
