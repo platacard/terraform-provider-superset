@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"terraform-provider-superset/internal/client"
 	"time"
@@ -181,14 +180,36 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 
 	tflog.Debug(ctx, "Role permissions updated")
 
-	// Set the state with the updated data
-	// Sort permissions for consistent ordering and to prevent drift warnings
-	sortResourcePermissions(resourcePermissions)
+	// Get fresh data from API after update to ensure correct computed IDs
+	apiPermissions, err := r.client.GetRolePermissions(roleID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error reading role permissions after creation",
+			fmt.Sprintf("Could not read permissions for role ID %d: %s", roleID, err),
+		)
+		return
+	}
+
+	// Build final permissions maintaining plan order
+	var finalPermissions []resourcePermissionModel
+	for _, planPerm := range plan.ResourcePermissions {
+		for _, apiPerm := range apiPermissions {
+			if apiPerm.PermissionName == planPerm.Permission.ValueString() &&
+				apiPerm.ViewMenuName == planPerm.ViewMenu.ValueString() {
+				finalPermissions = append(finalPermissions, resourcePermissionModel{
+					ID:         types.Int64Value(apiPerm.ID),
+					Permission: types.StringValue(apiPerm.PermissionName),
+					ViewMenu:   types.StringValue(apiPerm.ViewMenuName),
+				})
+				break
+			}
+		}
+	}
 
 	result := rolePermissionsResourceModel{
 		ID:                  types.StringValue(fmt.Sprintf("%d", roleID)),
 		RoleName:            plan.RoleName,
-		ResourcePermissions: resourcePermissions,
+		ResourcePermissions: finalPermissions,
 		LastUpdated:         types.StringValue(time.Now().Format(time.RFC3339)),
 	}
 
@@ -288,9 +309,6 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 		"resourcePermissions": debugResourcePermissions,
 	})
 
-	// Sort permissions for consistent ordering and to prevent drift warnings
-	sortResourcePermissions(resourcePermissions)
-
 	for _, rp := range resourcePermissions {
 		tflog.Debug(ctx, "Mapped Permission in List", map[string]interface{}{
 			"ID":         rp.ID.ValueInt64(),
@@ -319,6 +337,7 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *rolePermissionsResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	tflog.Debug(ctx, "Starting Update method")
+
 	// Retrieve values from plan
 	var plan rolePermissionsResourceModel
 	diags := req.Plan.Get(ctx, &plan)
@@ -330,9 +349,16 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	tflog.Debug(ctx, "Plan obtained", map[string]interface{}{
-		"roleName": plan.RoleName.ValueString(),
-	})
+	// Also get current state to understand current order
+	var state rolePermissionsResourceModel
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		tflog.Debug(ctx, "Exiting Update due to error in retrieving state", map[string]interface{}{
+			"diagnostics": resp.Diagnostics,
+		})
+		return
+	}
 
 	// Get the role ID based on role name
 	roleID, err := r.client.GetRoleIDByName(plan.RoleName.ValueString())
@@ -348,8 +374,7 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 		"roleID": roleID,
 	})
 
-	// Prepare permission IDs from plan using a map to ensure unique IDs
-	var resourcePermissions []resourcePermissionModel
+	// Build permission IDs list from plan for API call
 	permissionIDs := map[int64]bool{}
 	for _, perm := range plan.ResourcePermissions {
 		permID, err := r.client.GetPermissionIDByNameAndView(perm.Permission.ValueString(), perm.ViewMenu.ValueString())
@@ -361,11 +386,6 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 			return
 		}
 		permissionIDs[permID] = true
-		resourcePermissions = append(resourcePermissions, resourcePermissionModel{
-			ID:         types.Int64Value(permID),
-			Permission: perm.Permission,
-			ViewMenu:   perm.ViewMenu,
-		})
 	}
 
 	tflog.Debug(ctx, "Permission IDs prepared", map[string]interface{}{
@@ -393,14 +413,22 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 
 	tflog.Debug(ctx, "Role permissions updated")
 
-	// Set the state with the updated data
-	// Sort permissions for consistent ordering and to prevent drift warnings
-	sortResourcePermissions(resourcePermissions)
+	// Build final permissions to match the plan exactly.
+	// Do NOT resolve IDs here. Terraform expects null/unknown IDs
+	// for brand-new elements and existing IDs for reordered ones.
+	var finalPermissions []resourcePermissionModel
+	for _, planPerm := range plan.ResourcePermissions {
+		finalPermissions = append(finalPermissions, resourcePermissionModel{
+			ID:         planPerm.ID,
+			Permission: planPerm.Permission,
+			ViewMenu:   planPerm.ViewMenu,
+		})
+	}
 
 	result := rolePermissionsResourceModel{
 		ID:                  types.StringValue(fmt.Sprintf("%d", roleID)),
 		RoleName:            plan.RoleName,
-		ResourcePermissions: resourcePermissions,
+		ResourcePermissions: finalPermissions,
 		LastUpdated:         types.StringValue(time.Now().Format(time.RFC3339)),
 	}
 
@@ -463,14 +491,15 @@ func (r *rolePermissionsResource) Delete(ctx context.Context, req resource.Delet
 
 // sortResourcePermissions sorts permissions by permission name, then by view menu name
 // to ensure consistent ordering and prevent drift warnings due to order differences.
-func sortResourcePermissions(permissions []resourcePermissionModel) {
-	sort.Slice(permissions, func(i, j int) bool {
-		if permissions[i].Permission.ValueString() == permissions[j].Permission.ValueString() {
-			return permissions[i].ViewMenu.ValueString() < permissions[j].ViewMenu.ValueString()
-		}
-		return permissions[i].Permission.ValueString() < permissions[j].Permission.ValueString()
-	})
-}
+// DISABLED: Function disabled to preserve plan order and prevent drift warnings
+// func sortResourcePermissions(permissions []resourcePermissionModel) {
+// 	sort.Slice(permissions, func(i, j int) bool {
+// 		if permissions[i].Permission.ValueString() == permissions[j].Permission.ValueString() {
+// 			return permissions[i].ViewMenu.ValueString() < permissions[j].ViewMenu.ValueString()
+// 		}
+// 		return permissions[i].Permission.ValueString() < permissions[j].Permission.ValueString()
+// 	})
+// }
 
 // Configure adds the provider configured client to the resource.
 func (r *rolePermissionsResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
