@@ -489,7 +489,6 @@ func (r *rolePermissionsResource) Delete(ctx context.Context, req resource.Delet
 	tflog.Debug(ctx, "Delete method completed successfully")
 }
 
-
 // Configure adds the provider configured client to the resource.
 func (r *rolePermissionsResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
