@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
-
+	"sort"
 	"strconv"
 	"terraform-provider-superset/internal/client"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -42,6 +43,9 @@ type rolePermissionsResourceModel struct {
 	LastUpdated         types.String              `tfsdk:"last_updated"`
 }
 
+// resourcePermissionModel represents a permission with its computed ID field.
+// The ID field uses UseStateForUnknown plan modifier to prevent drift warnings
+// when the computed ID values change but the actual permission content remains the same.
 type resourcePermissionModel struct {
 	ID         types.Int64  `tfsdk:"id"`
 	Permission types.String `tfsdk:"permission"`
@@ -81,6 +85,9 @@ func (r *rolePermissionsResource) Schema(_ context.Context, _ resource.SchemaReq
 						"id": schema.Int64Attribute{
 							Description: "The unique identifier of the permission.",
 							Computed:    true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
 						},
 						"permission": schema.StringAttribute{
 							Description: "The name of the permission.",
@@ -175,9 +182,8 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 	tflog.Debug(ctx, "Role permissions updated")
 
 	// Set the state with the updated data
-	// sort.Slice(resourcePermissions, func(i, j int) bool {
-	// 	return resourcePermissions[i].ID.ValueInt64() < resourcePermissions[j].ID.ValueInt64()
-	// })
+	// Sort permissions for consistent ordering and to prevent drift warnings
+	sortResourcePermissions(resourcePermissions)
 
 	result := rolePermissionsResourceModel{
 		ID:                  types.StringValue(fmt.Sprintf("%d", roleID)),
@@ -282,10 +288,8 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 		"resourcePermissions": debugResourcePermissions,
 	})
 
-	// Verify the final mapped permissions
-	// sort.Slice(resourcePermissions, func(i, j int) bool {
-	// 	return resourcePermissions[i].ID.ValueInt64() < resourcePermissions[j].ID.ValueInt64()
-	// })
+	// Sort permissions for consistent ordering and to prevent drift warnings
+	sortResourcePermissions(resourcePermissions)
 
 	for _, rp := range resourcePermissions {
 		tflog.Debug(ctx, "Mapped Permission in List", map[string]interface{}{
@@ -390,9 +394,8 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 	tflog.Debug(ctx, "Role permissions updated")
 
 	// Set the state with the updated data
-	// sort.Slice(resourcePermissions, func(i, j int) bool {
-	// 	return resourcePermissions[i].ID.ValueInt64() < resourcePermissions[j].ID.ValueInt64()
-	// })
+	// Sort permissions for consistent ordering and to prevent drift warnings
+	sortResourcePermissions(resourcePermissions)
 
 	result := rolePermissionsResourceModel{
 		ID:                  types.StringValue(fmt.Sprintf("%d", roleID)),
@@ -456,6 +459,17 @@ func (r *rolePermissionsResource) Delete(ctx context.Context, req resource.Delet
 
 	resp.State.RemoveResource(ctx)
 	tflog.Debug(ctx, "Delete method completed successfully")
+}
+
+// sortResourcePermissions sorts permissions by permission name, then by view menu name
+// to ensure consistent ordering and prevent drift warnings due to order differences.
+func sortResourcePermissions(permissions []resourcePermissionModel) {
+	sort.Slice(permissions, func(i, j int) bool {
+		if permissions[i].Permission.ValueString() == permissions[j].Permission.ValueString() {
+			return permissions[i].ViewMenu.ValueString() < permissions[j].ViewMenu.ValueString()
+		}
+		return permissions[i].Permission.ValueString() < permissions[j].Permission.ValueString()
+	})
 }
 
 // Configure adds the provider configured client to the resource.
