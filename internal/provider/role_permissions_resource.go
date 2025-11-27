@@ -489,17 +489,6 @@ func (r *rolePermissionsResource) Delete(ctx context.Context, req resource.Delet
 	tflog.Debug(ctx, "Delete method completed successfully")
 }
 
-// sortResourcePermissions sorts permissions by permission name, then by view menu name
-// to ensure consistent ordering and prevent drift warnings due to order differences.
-// DISABLED: Function disabled to preserve plan order and prevent drift warnings
-// func sortResourcePermissions(permissions []resourcePermissionModel) {
-// 	sort.Slice(permissions, func(i, j int) bool {
-// 		if permissions[i].Permission.ValueString() == permissions[j].Permission.ValueString() {
-// 			return permissions[i].ViewMenu.ValueString() < permissions[j].ViewMenu.ValueString()
-// 		}
-// 		return permissions[i].Permission.ValueString() < permissions[j].Permission.ValueString()
-// 	})
-// }
 
 // Configure adds the provider configured client to the resource.
 func (r *rolePermissionsResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
