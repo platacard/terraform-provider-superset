@@ -134,7 +134,7 @@ func TestAccDatasetResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccDatasetResourceConfig("test_table", "PostgreSQL Database", "public"),
+				Config: providerConfig + testAccDatasetResourceConfig("test_table", "PostgreSQL Database", "public"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "test_table"),
 					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),
@@ -151,7 +151,7 @@ func TestAccDatasetResource(t *testing.T) {
 			},
 			// Update and Read testing
 			{
-				Config: testAccDatasetResourceConfig("updated_table", "PostgreSQL Database", "updated_schema"),
+				Config: providerConfig + testAccDatasetResourceConfig("updated_table", "PostgreSQL Database", "updated_schema"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "updated_table"),
 					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),
@@ -258,7 +258,7 @@ func TestAccDatasetResourceWithSQL(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing with SQL
 			{
-				Config: testAccDatasetResourceConfigWithSQL("sql_dataset", "PostgreSQL Database", "SELECT * FROM users"),
+				Config: providerConfig + testAccDatasetResourceConfigWithSQL("sql_dataset", "PostgreSQL Database", "SELECT * FROM users"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("superset_dataset.test", "table_name", "sql_dataset"),
 					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "PostgreSQL Database"),

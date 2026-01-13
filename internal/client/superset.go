@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +21,15 @@ var (
 	globalDatabasesCacheMutex sync.RWMutex
 )
 
+// Global cache for permissions-resources to avoid rate limiting during role_permissions creation.
+// Key: "permissionName|viewMenuName" -> Value: permission ID
+var (
+	globalPermissionsCache      map[string]int64
+	globalPermissionsCacheTime  time.Time
+	globalPermissionsCacheTTL   = 2 * time.Minute // Cache for 2 minutes
+	globalPermissionsCacheMutex sync.RWMutex
+)
+
 // Client represents a client for Superset API.
 type Client struct {
 	Host     string
@@ -25,9 +37,15 @@ type Client struct {
 	Password string
 	Token    string
 	Cookies  []*http.Cookie
+	// OIDC client credentials fields
+	OIDCTokenURL string
+	ClientID     string
+	ClientSecret string
+	TokenExpiry  time.Time
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
+// It uses database authentication (AUTH_DB) to obtain an access token.
 // It returns a pointer to the created Client and an error if authentication fails.
 func NewClient(host, username, password string) (*Client, error) {
 	client := &Client{
@@ -42,6 +60,79 @@ func NewClient(host, username, password string) (*Client, error) {
 	}
 
 	return client, nil
+}
+
+// NewClientWithOIDC creates a new Superset client using OIDC client credentials authentication.
+// This is the recommended method for Superset instances configured with OAuth/OIDC (e.g., Keycloak).
+// The client credentials grant is used to obtain an access token from the identity provider,
+// which is then used as a Bearer token for Superset API requests.
+func NewClientWithOIDC(host, oidcTokenURL, clientID, clientSecret string) (*Client, error) {
+	client := &Client{
+		Host:         host,
+		OIDCTokenURL: oidcTokenURL,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+	}
+
+	err := client.authenticateOIDC()
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// authenticateOIDC authenticates using OIDC client credentials grant.
+// It requests an access token from the OIDC provider's token endpoint.
+func (c *Client) authenticateOIDC() error {
+	data := url.Values{}
+	data.Set("grant_type", "client_credentials")
+	data.Set("client_id", c.ClientID)
+	data.Set("client_secret", c.ClientSecret)
+
+	req, err := http.NewRequest("POST", c.OIDCTokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create OIDC token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to request OIDC token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read OIDC token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("OIDC token request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResponse struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+		TokenType   string `json:"token_type"`
+	}
+
+	if err := json.Unmarshal(body, &tokenResponse); err != nil {
+		return fmt.Errorf("failed to parse OIDC token response: %w", err)
+	}
+
+	if tokenResponse.AccessToken == "" {
+		return fmt.Errorf("OIDC token response did not contain access_token")
+	}
+
+	c.Token = tokenResponse.AccessToken
+	// Set token expiry with a small buffer (30 seconds before actual expiry)
+	if tokenResponse.ExpiresIn > 0 {
+		c.TokenExpiry = time.Now().Add(time.Duration(tokenResponse.ExpiresIn-30) * time.Second)
+	}
+
+	return nil
 }
 
 // authenticate sends an authentication request to the Superset API using the provided username and password.
@@ -463,38 +554,101 @@ func (c *Client) DeleteRole(id int64) error {
 // - int64: The ID of the permission resource if found.
 // - error: An error if the request fails or if the permission resource is not found.
 func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
-	endpoint := "/api/v1/security/permissions-resources?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
+	cacheKey := permissionName + "|" + viewMenuName
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Resources []struct {
-			ID         int64 `json:"id"`
-			Permission struct {
-				Name string `json:"name"`
-			} `json:"permission"`
-			ViewMenu struct {
-				Name string `json:"name"`
-			} `json:"view_menu"`
-		} `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, resource := range result.Resources {
-		if resource.Permission.Name == permissionName && resource.ViewMenu.Name == viewMenuName {
-			return resource.ID, nil
+	// Check cache first (read lock)
+	globalPermissionsCacheMutex.RLock()
+	if globalPermissionsCache != nil && time.Since(globalPermissionsCacheTime) < globalPermissionsCacheTTL {
+		if id, ok := globalPermissionsCache[cacheKey]; ok {
+			globalPermissionsCacheMutex.RUnlock()
+			return id, nil
 		}
+		// Cache exists but permission not found - could still be not found
+		globalPermissionsCacheMutex.RUnlock()
+		return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
+	}
+	globalPermissionsCacheMutex.RUnlock()
+
+	// Cache miss or expired - rebuild cache (write lock)
+	globalPermissionsCacheMutex.Lock()
+	defer globalPermissionsCacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if globalPermissionsCache != nil && time.Since(globalPermissionsCacheTime) < globalPermissionsCacheTTL {
+		if id, ok := globalPermissionsCache[cacheKey]; ok {
+			return id, nil
+		}
+		return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
+	}
+
+	// Rebuild cache by fetching all permissions with pagination
+	globalPermissionsCache = make(map[string]int64)
+	const pageSize = 100
+	page := 0
+
+	for {
+		endpoint := fmt.Sprintf("/api/v1/security/permissions-resources?q=(page:%d,page_size:%d)", page, pageSize)
+		resp, err := c.DoRequest("GET", endpoint, nil)
+		if err != nil {
+			return 0, err
+		}
+
+		// Handle rate limiting with retry
+		if resp.StatusCode == 429 {
+			resp.Body.Close()
+			time.Sleep(2 * time.Second)
+			resp, err = c.DoRequest("GET", endpoint, nil)
+			if err != nil {
+				return 0, err
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
+		}
+
+		var result struct {
+			Count     int `json:"count"`
+			Resources []struct {
+				ID         int64 `json:"id"`
+				Permission struct {
+					Name string `json:"name"`
+				} `json:"permission"`
+				ViewMenu struct {
+					Name string `json:"name"`
+				} `json:"view_menu"`
+			} `json:"result"`
+		}
+
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return 0, err
+		}
+
+		// Add all permissions to cache
+		for _, resource := range result.Resources {
+			key := resource.Permission.Name + "|" + resource.ViewMenu.Name
+			globalPermissionsCache[key] = resource.ID
+		}
+
+		// Check if we've fetched all pages
+		fetched := (page + 1) * pageSize
+		if fetched >= result.Count || len(result.Resources) == 0 {
+			break
+		}
+		page++
+
+		// Small delay to avoid rate limiting
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	globalPermissionsCacheTime = time.Now()
+
+	// Look up the requested permission from the cache
+	if id, ok := globalPermissionsCache[cacheKey]; ok {
+		return id, nil
 	}
 
 	return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
@@ -741,8 +895,27 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 
 // CreateDatabase creates a new database in the Superset application.
 // It takes a payload map[string]interface{} as input, which contains the necessary data for creating the database.
+// If a database with the same name already exists, it returns the existing database info.
 // The function returns a map[string]interface{} containing the response from the API and an error, if any.
 func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
+	// Check if database already exists by name (idempotency)
+	databaseName, _ := payload["database_name"].(string)
+	if databaseName != "" {
+		existingID, err := c.GetDatabaseIDByName(databaseName)
+		if err == nil && existingID > 0 {
+			// Database exists - fetch and return its details
+			dbInfo, err := c.GetDatabaseConnectionByID(existingID)
+			if err == nil {
+				// Build result format matching create response
+				result := map[string]interface{}{
+					"id":     float64(existingID),
+					"result": dbInfo["result"],
+				}
+				return result, nil
+			}
+		}
+	}
+
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
 		return nil, err
@@ -867,13 +1040,49 @@ type DatasetRequest struct {
 }
 
 // CreateDataset creates a new dataset in Superset.
+// If a dataset with the same table_name and database already exists, it returns the existing dataset.
 func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{}, error) {
+	// Check if dataset already exists (idempotency)
+	existingDatasets, err := c.GetAllDatasets()
+	if err == nil {
+		for _, ds := range existingDatasets {
+			tableName, _ := ds["table_name"].(string)
+			// Check database match via the database object
+			if dbInfo, ok := ds["database"].(map[string]interface{}); ok {
+				dbID, _ := dbInfo["id"].(float64)
+				if tableName == dataset.TableName && int64(dbID) == dataset.Database {
+					// Dataset exists - return it
+					if dsID, ok := ds["id"].(float64); ok {
+						existingDS, getErr := c.GetDataset(int64(dsID))
+						if getErr == nil {
+							result := map[string]interface{}{
+								"id":     dsID,
+								"result": *existingDS,
+							}
+							return &result, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := "/api/v1/dataset/"
 
 	// Debug: log the request payload
 	fmt.Printf("DEBUG CreateDataset: Sending request to %s with payload: %+v\n", endpoint, dataset)
 
-	resp, err := c.DoRequest("POST", endpoint, dataset)
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, dataset, headers, cookies)
 	if err != nil {
 		return nil, err
 	}
@@ -940,6 +1149,16 @@ type DatasetUpdateRequest struct {
 
 // UpdateDataset updates an existing dataset (database field cannot be changed).
 func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
 
 	updateReq := DatasetUpdateRequest{
@@ -951,7 +1170,7 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 	// Debug: log the update request payload
 	fmt.Printf("DEBUG UpdateDataset: Sending UPDATE request to %s with payload: %+v\n", endpoint, updateReq)
 
-	resp, err := c.DoRequest("PUT", endpoint, updateReq)
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, updateReq, headers, cookies)
 	if err != nil {
 		return err
 	}
@@ -967,8 +1186,18 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 
 // DeleteDataset deletes a dataset by ID.
 func (c *Client) DeleteDataset(id int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
-	resp, err := c.DoRequest("DELETE", endpoint, nil)
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", endpoint, nil, headers, cookies)
 	if err != nil {
 		return err
 	}
@@ -1490,6 +1719,578 @@ func (c *Client) DeleteUser(id int64) error {
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to delete user, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Chart API Methods
+// ============================================================================
+
+// Chart represents a chart in the Superset application.
+type Chart struct {
+	ID             int64   `json:"id"`
+	SliceName      string  `json:"slice_name"`
+	DatasourceID   int64   `json:"datasource_id"`
+	DatasourceType string  `json:"datasource_type"`
+	VizType        string  `json:"viz_type"`
+	Description    string  `json:"description"`
+	Params         string  `json:"params"`
+	CacheTimeout   *int64  `json:"cache_timeout"`
+	CertifiedBy    string  `json:"certified_by"`
+	CertDetails    string  `json:"certification_details"`
+}
+
+// ChartCreateRequest represents the request structure for creating a chart.
+type ChartCreateRequest struct {
+	SliceName      string  `json:"slice_name"`
+	DatasourceID   int64   `json:"datasource_id"`
+	DatasourceType string  `json:"datasource_type"`
+	VizType        string  `json:"viz_type,omitempty"`
+	Description    string  `json:"description,omitempty"`
+	Params         string  `json:"params,omitempty"`
+	CacheTimeout   *int64  `json:"cache_timeout,omitempty"`
+	CertifiedBy    string  `json:"certified_by,omitempty"`
+	CertDetails    string  `json:"certification_details,omitempty"`
+	Owners         []int64 `json:"owners,omitempty"`
+	Dashboards     []int64 `json:"dashboards,omitempty"`
+}
+
+// ChartUpdateRequest represents the request structure for updating a chart.
+type ChartUpdateRequest struct {
+	SliceName      string  `json:"slice_name,omitempty"`
+	DatasourceID   int64   `json:"datasource_id,omitempty"`
+	DatasourceType string  `json:"datasource_type,omitempty"`
+	VizType        string  `json:"viz_type,omitempty"`
+	Description    string  `json:"description,omitempty"`
+	Params         string  `json:"params,omitempty"`
+	CacheTimeout   *int64  `json:"cache_timeout,omitempty"`
+	CertifiedBy    string  `json:"certified_by,omitempty"`
+	CertDetails    string  `json:"certification_details,omitempty"`
+	Owners         []int64 `json:"owners,omitempty"`
+	Dashboards     []int64 `json:"dashboards,omitempty"`
+}
+
+// GetAllCharts fetches all charts from Superset.
+func (c *Client) GetAllCharts() ([]map[string]interface{}, error) {
+	endpoint := "/api/v1/chart/?q=(page_size:5000)"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch charts from Superset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result []map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
+// GetChart fetches a specific chart by ID.
+func (c *Client) GetChart(id int64) (*Chart, error) {
+	endpoint := fmt.Sprintf("/api/v1/chart/%d", id)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("chart with ID %d not found", id)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch chart, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map the response to Chart struct
+	chart := &Chart{
+		ID: id,
+	}
+
+	if sliceName, ok := result.Result["slice_name"].(string); ok {
+		chart.SliceName = sliceName
+	}
+	if vizType, ok := result.Result["viz_type"].(string); ok {
+		chart.VizType = vizType
+	}
+	if description, ok := result.Result["description"].(string); ok {
+		chart.Description = description
+	}
+	if params, ok := result.Result["params"].(string); ok {
+		chart.Params = params
+	}
+	if cacheTimeout, ok := result.Result["cache_timeout"].(float64); ok {
+		ct := int64(cacheTimeout)
+		chart.CacheTimeout = &ct
+	}
+	if certifiedBy, ok := result.Result["certified_by"].(string); ok {
+		chart.CertifiedBy = certifiedBy
+	}
+	if certDetails, ok := result.Result["certification_details"].(string); ok {
+		chart.CertDetails = certDetails
+	}
+
+	// Extract datasource info from query_context JSON
+	// The API returns datasource info inside query_context.datasource, not as top-level fields
+	if queryContext, ok := result.Result["query_context"].(string); ok && queryContext != "" {
+		var qc struct {
+			Datasource struct {
+				ID   int64  `json:"id"`
+				Type string `json:"type"`
+			} `json:"datasource"`
+		}
+		if err := json.Unmarshal([]byte(queryContext), &qc); err == nil {
+			chart.DatasourceID = qc.Datasource.ID
+			chart.DatasourceType = qc.Datasource.Type
+		}
+	}
+
+	// Fallback: try to get from params if query_context didn't work
+	if chart.DatasourceID == 0 {
+		if params, ok := result.Result["params"].(string); ok && params != "" {
+			var p struct {
+				Datasource string `json:"datasource"` // format: "10__table"
+			}
+			if err := json.Unmarshal([]byte(params), &p); err == nil && p.Datasource != "" {
+				// Parse "10__table" format
+				parts := strings.Split(p.Datasource, "__")
+				if len(parts) == 2 {
+					if id, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+						chart.DatasourceID = id
+						chart.DatasourceType = parts[1]
+					}
+				}
+			}
+		}
+	}
+
+	return chart, nil
+}
+
+// CreateChart creates a new chart in Superset.
+func (c *Client) CreateChart(req ChartCreateRequest) (int64, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return 0, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := "/api/v1/chart/"
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, req, headers, cookies)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to create chart, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	id, ok := result["id"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("failed to retrieve chart ID from response")
+	}
+
+	return int64(id), nil
+}
+
+// UpdateChart updates an existing chart.
+func (c *Client) UpdateChart(id int64, req ChartUpdateRequest) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/chart/%d", id)
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, req, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update chart, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteChart deletes a chart by ID.
+func (c *Client) DeleteChart(id int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/chart/%d", id)
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", endpoint, nil, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete chart, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Dashboard API Methods
+// ============================================================================
+
+// Dashboard represents a dashboard in the Superset application.
+type Dashboard struct {
+	ID            int64   `json:"id"`
+	DashboardTitle string `json:"dashboard_title"`
+	Slug          string  `json:"slug"`
+	Published     bool    `json:"published"`
+	JsonMetadata  string  `json:"json_metadata"`
+	PositionJSON  string  `json:"position_json"`
+	CSS           string  `json:"css"`
+	CertifiedBy   string  `json:"certified_by"`
+	CertDetails   string  `json:"certification_details"`
+}
+
+// DashboardCreateRequest represents the request structure for creating a dashboard.
+type DashboardCreateRequest struct {
+	DashboardTitle string  `json:"dashboard_title"`
+	Slug           string  `json:"slug,omitempty"`
+	Published      bool    `json:"published,omitempty"`
+	JsonMetadata   string  `json:"json_metadata,omitempty"`
+	PositionJSON   string  `json:"position_json,omitempty"`
+	CSS            string  `json:"css,omitempty"`
+	CertifiedBy    string  `json:"certified_by,omitempty"`
+	CertDetails    string  `json:"certification_details,omitempty"`
+	Owners         []int64 `json:"owners,omitempty"`
+	Roles          []int64 `json:"roles,omitempty"`
+}
+
+// DashboardUpdateRequest represents the request structure for updating a dashboard.
+type DashboardUpdateRequest struct {
+	DashboardTitle string  `json:"dashboard_title,omitempty"`
+	Slug           string  `json:"slug,omitempty"`
+	Published      *bool   `json:"published,omitempty"`
+	JsonMetadata   string  `json:"json_metadata,omitempty"`
+	PositionJSON   string  `json:"position_json,omitempty"`
+	CSS            string  `json:"css,omitempty"`
+	CertifiedBy    string  `json:"certified_by,omitempty"`
+	CertDetails    string  `json:"certification_details,omitempty"`
+	Owners         []int64 `json:"owners,omitempty"`
+	Roles          []int64 `json:"roles,omitempty"`
+}
+
+// GetAllDashboards fetches all dashboards from Superset.
+func (c *Client) GetAllDashboards() ([]map[string]interface{}, error) {
+	endpoint := "/api/v1/dashboard/?q=(page_size:5000)"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch dashboards from Superset, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result []map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Result, nil
+}
+
+// GetDashboard fetches a specific dashboard by ID.
+func (c *Client) GetDashboard(id int64) (*Dashboard, error) {
+	endpoint := fmt.Sprintf("/api/v1/dashboard/%d", id)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("dashboard with ID %d not found", id)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch dashboard, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Result map[string]interface{} `json:"result"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map the response to Dashboard struct
+	dashboard := &Dashboard{
+		ID: id,
+	}
+
+	if title, ok := result.Result["dashboard_title"].(string); ok {
+		dashboard.DashboardTitle = title
+	}
+	if slug, ok := result.Result["slug"].(string); ok {
+		dashboard.Slug = slug
+	}
+	if published, ok := result.Result["published"].(bool); ok {
+		dashboard.Published = published
+	}
+	if jsonMetadata, ok := result.Result["json_metadata"].(string); ok {
+		dashboard.JsonMetadata = jsonMetadata
+	}
+	if positionJSON, ok := result.Result["position_json"].(string); ok {
+		dashboard.PositionJSON = positionJSON
+	}
+	if css, ok := result.Result["css"].(string); ok {
+		dashboard.CSS = css
+	}
+	if certifiedBy, ok := result.Result["certified_by"].(string); ok {
+		dashboard.CertifiedBy = certifiedBy
+	}
+	if certDetails, ok := result.Result["certification_details"].(string); ok {
+		dashboard.CertDetails = certDetails
+	}
+
+	return dashboard, nil
+}
+
+// mergePositionsIntoMetadata adds positions to json_metadata to trigger chart linking.
+// Superset's UpdateDashboardCommand calls set_dash_metadata when json_metadata contains
+// a "positions" key, which properly populates the dashboard_slices table.
+func mergePositionsIntoMetadata(jsonMetadata, positionJSON string) string {
+	if positionJSON == "" {
+		return jsonMetadata
+	}
+
+	// Parse position_json
+	var positions map[string]interface{}
+	if err := json.Unmarshal([]byte(positionJSON), &positions); err != nil {
+		return jsonMetadata
+	}
+
+	// Parse existing json_metadata or create new
+	var metadata map[string]interface{}
+	if jsonMetadata != "" {
+		if err := json.Unmarshal([]byte(jsonMetadata), &metadata); err != nil {
+			metadata = make(map[string]interface{})
+		}
+	} else {
+		metadata = make(map[string]interface{})
+	}
+
+	// Add positions to metadata - this triggers chart linking in Superset
+	metadata["positions"] = positions
+
+	// Marshal back to JSON
+	result, err := json.Marshal(metadata)
+	if err != nil {
+		return jsonMetadata
+	}
+
+	return string(result)
+}
+
+// CreateDashboard creates a new dashboard in Superset.
+func (c *Client) CreateDashboard(req DashboardCreateRequest) (int64, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return 0, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := "/api/v1/dashboard/"
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, req, headers, cookies)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to create dashboard, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	id, ok := result["id"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("failed to retrieve dashboard ID from response")
+	}
+
+	dashboardID := int64(id)
+
+	// Link charts by updating with json_metadata containing positions
+	// Superset's UpdateDashboardCommand.run() calls set_dash_metadata when
+	// json_metadata contains a "positions" key, which populates dashboard_slices
+	if req.PositionJSON != "" {
+		mergedMetadata := mergePositionsIntoMetadata(req.JsonMetadata, req.PositionJSON)
+		updateReq := DashboardUpdateRequest{
+			JsonMetadata: mergedMetadata,
+		}
+		if err := c.UpdateDashboard(dashboardID, updateReq); err != nil {
+			// Log but don't fail - dashboard was created successfully
+			fmt.Printf("Warning: failed to link charts to dashboard: %v\n", err)
+		}
+	}
+
+	return dashboardID, nil
+}
+
+// UpdateDashboard updates an existing dashboard.
+func (c *Client) UpdateDashboard(id int64, req DashboardUpdateRequest) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	// Merge positions into json_metadata to trigger chart linking
+	// Superset's UpdateDashboardCommand calls set_dash_metadata when
+	// json_metadata contains a "positions" key, which populates dashboard_slices
+	if req.PositionJSON != "" {
+		req.JsonMetadata = mergePositionsIntoMetadata(req.JsonMetadata, req.PositionJSON)
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/dashboard/%d", id)
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, req, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update dashboard, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteDashboard deletes a dashboard by ID.
+func (c *Client) DeleteDashboard(id int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/dashboard/%d", id)
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", endpoint, nil, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete dashboard, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// LinkDashboardSlices links chart slices to a dashboard.
+func (c *Client) LinkDashboardSlices(dashboardID int64, sliceIDs []int64) error {
+	if len(sliceIDs) == 0 {
+		return nil
+	}
+
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
+	// The Superset API accepts slices as an array of chart IDs
+	payload := map[string]interface{}{
+		"slices": sliceIDs,
+	}
+
+	endpoint := fmt.Sprintf("/api/v1/dashboard/%d", dashboardID)
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, payload, headers, cookies)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to link slices to dashboard, status code: %d, response: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
