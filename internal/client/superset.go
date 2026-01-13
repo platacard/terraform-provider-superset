@@ -187,11 +187,32 @@ func (c *Client) authenticate() error {
 	return nil
 }
 
+// refreshOIDCTokenIfNeeded checks if the OIDC token is about to expire and refreshes it.
+// This is a no-op for clients using database authentication.
+func (c *Client) refreshOIDCTokenIfNeeded() error {
+	// Only refresh if using OIDC authentication
+	if c.OIDCTokenURL == "" {
+		return nil
+	}
+
+	// Check if token is expired or will expire soon
+	if time.Now().After(c.TokenExpiry) {
+		return c.authenticateOIDC()
+	}
+
+	return nil
+}
+
 // DoRequest sends an HTTP request to the specified endpoint using the specified method.
 // It takes the HTTP method, endpoint URL, and payload as input parameters.
 // If a payload is provided, it will be serialized to JSON before sending the request.
 // The function returns the HTTP response and an error, if any.
 func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.Response, error) {
+	// Refresh OIDC token if needed
+	if err := c.refreshOIDCTokenIfNeeded(); err != nil {
+		return nil, fmt.Errorf("failed to refresh OIDC token: %w", err)
+	}
+
 	url := fmt.Sprintf("%s%s", c.Host, endpoint)
 	var jsonPayload []byte
 	var err error
@@ -216,6 +237,11 @@ func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.
 
 // DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies.
 func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload interface{}, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
+	// Refresh OIDC token if needed
+	if err := c.refreshOIDCTokenIfNeeded(); err != nil {
+		return nil, fmt.Errorf("failed to refresh OIDC token: %w", err)
+	}
+
 	url := fmt.Sprintf("%s%s", c.Host, endpoint)
 	var jsonPayload []byte
 	var err error
@@ -499,7 +525,6 @@ func (c *Client) UpdateRole(id int64, name string) error {
 	}
 
 	if existingRole.Name == name {
-		fmt.Printf("Role with ID %d already has the name '%s'. No update necessary.\n", id, name)
 		return nil
 	}
 
@@ -516,7 +541,6 @@ func (c *Client) UpdateRole(id int64, name string) error {
 		return fmt.Errorf("failed to update role, status code: %d, response: %s", resp.StatusCode, string(body))
 	}
 
-	fmt.Printf("Role with ID %d successfully updated to name '%s'.\n", id, name)
 	return nil
 }
 
@@ -791,8 +815,6 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 	// Check global cache first (read lock)
 	globalDatabasesCacheMutex.RLock()
 	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
-		fmt.Printf("DEBUG GetAllDatabases: Using global cached result with %d databases (age: %v)\n",
-			len(globalDatabasesCache), time.Since(globalDatabasesCacheTime))
 		result := globalDatabasesCache
 		globalDatabasesCacheMutex.RUnlock()
 		return result, nil
@@ -805,12 +827,10 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 
 	// Double-check in case another goroutine already fetched while we were waiting
 	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
-		fmt.Printf("DEBUG GetAllDatabases: Using global cached result (double-check) with %d databases\n", len(globalDatabasesCache))
 		return globalDatabasesCache, nil
 	}
 
 	endpoint := "/api/v1/database/?q=(page_size:5000)"
-	fmt.Printf("DEBUG GetAllDatabases: Making API call to %s\n", endpoint)
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -833,7 +853,6 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 	globalDatabasesCache = result.Result
 	globalDatabasesCacheTime = time.Now()
 
-	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(result.Result))
 	return result.Result, nil
 }
 
@@ -1079,9 +1098,6 @@ func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{},
 
 	endpoint := "/api/v1/dataset/"
 
-	// Debug: log the request payload
-	fmt.Printf("DEBUG CreateDataset: Sending request to %s with payload: %+v\n", endpoint, dataset)
-
 	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, dataset, headers, cookies)
 	if err != nil {
 		return nil, err
@@ -1108,7 +1124,6 @@ func ClearGlobalDatabaseCache() {
 	defer globalDatabasesCacheMutex.Unlock()
 	globalDatabasesCache = nil
 	globalDatabasesCacheTime = time.Time{}
-	fmt.Printf("DEBUG ClearGlobalDatabaseCache: Global database cache cleared\n")
 }
 
 // GetDataset fetches a specific dataset by ID.
@@ -1166,9 +1181,6 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 		Schema:    schema,
 		SQL:       sql,
 	}
-
-	// Debug: log the update request payload
-	fmt.Printf("DEBUG UpdateDataset: Sending UPDATE request to %s with payload: %+v\n", endpoint, updateReq)
 
 	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, updateReq, headers, cookies)
 	if err != nil {
@@ -1377,68 +1389,35 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 
 	metaDB := &result.Result
 
-	// For debugging, also try to get full database info from list endpoint
-	fmt.Printf("DEBUG GetMetaDatabase: Trying to get extra field from list endpoint for ID %d\n", id)
+	// Try to get full database info from list endpoint (extra field may not be in single-item response)
 	allDBs, listErr := c.GetAllDatabases()
 	if listErr == nil {
-		fmt.Printf("DEBUG GetMetaDatabase: Successfully got %d databases from list endpoint\n", len(allDBs))
-		found := false
 		for _, db := range allDBs {
 			if dbIDFloat, ok := db["id"].(float64); ok && int64(dbIDFloat) == id {
-				found = true
-				fmt.Printf("DEBUG GetMetaDatabase: Found matching database in list: %+v\n", db)
-				if extraStr, ok := db["extra"].(string); ok {
-					if extraStr != "" {
-						fmt.Printf("DEBUG GetMetaDatabase: Found extra field from list endpoint: %q\n", extraStr)
-						metaDB.Extra = extraStr
-					} else {
-						fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty even in list endpoint\n")
-					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No extra field found in list endpoint response\n")
+				if extraStr, ok := db["extra"].(string); ok && extraStr != "" {
+					metaDB.Extra = extraStr
 				}
 				break
 			}
 		}
-		if !found {
-			fmt.Printf("DEBUG GetMetaDatabase: Database ID %d not found in list of %d databases\n", id, len(allDBs))
-		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Failed to get from list endpoint: %v\n", listErr)
 	}
 
 	// Parse allowed_dbs from extra field
-	fmt.Printf("DEBUG GetMetaDatabase: Raw extra field = %q\n", metaDB.Extra)
 	if metaDB.Extra != "" {
 		var extraData map[string]interface{}
 		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil {
-			fmt.Printf("DEBUG GetMetaDatabase: Parsed extraData = %+v\n", extraData)
 			if engineParams, ok := extraData["engine_params"].(map[string]interface{}); ok {
-				fmt.Printf("DEBUG GetMetaDatabase: Found engine_params = %+v\n", engineParams)
 				if allowedDBs, ok := engineParams["allowed_dbs"].([]interface{}); ok {
-					fmt.Printf("DEBUG GetMetaDatabase: Found allowed_dbs = %+v (length: %d)\n", allowedDBs, len(allowedDBs))
 					metaDB.AllowedDBs = make([]string, len(allowedDBs))
 					for i, db := range allowedDBs {
 						if dbStr, ok := db.(string); ok {
 							metaDB.AllowedDBs[i] = dbStr
-							fmt.Printf("DEBUG GetMetaDatabase: Added allowed_db[%d] = %q\n", i, dbStr)
-						} else {
-							fmt.Printf("DEBUG GetMetaDatabase: Failed to convert allowed_db[%d] to string: %+v (type: %T)\n", i, db, db)
 						}
 					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No 'allowed_dbs' found in engine_params\n")
 				}
-			} else {
-				fmt.Printf("DEBUG GetMetaDatabase: No 'engine_params' found in extraData\n")
 			}
-		} else {
-			fmt.Printf("DEBUG GetMetaDatabase: Failed to unmarshal extra field as JSON: %v\n", err)
 		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty\n")
 	}
-	fmt.Printf("DEBUG GetMetaDatabase: Final AllowedDBs = %+v (length: %d)\n", metaDB.AllowedDBs, len(metaDB.AllowedDBs))
 
 	return metaDB, nil
 }
@@ -2190,10 +2169,8 @@ func (c *Client) CreateDashboard(req DashboardCreateRequest) (int64, error) {
 		updateReq := DashboardUpdateRequest{
 			JsonMetadata: mergedMetadata,
 		}
-		if err := c.UpdateDashboard(dashboardID, updateReq); err != nil {
-			// Log but don't fail - dashboard was created successfully
-			fmt.Printf("Warning: failed to link charts to dashboard: %v\n", err)
-		}
+		// Ignore error - dashboard was created successfully, chart linking is best effort
+		_ = c.UpdateDashboard(dashboardID, updateReq)
 	}
 
 	return dashboardID, nil

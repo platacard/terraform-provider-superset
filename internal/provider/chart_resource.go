@@ -169,8 +169,21 @@ func (r *chartResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	// Update the state
+	// Update the state with the ID
 	plan.ID = types.Int64Value(chartID)
+
+	// Read back the chart to get computed values
+	chart, err := r.client.GetChart(chartID)
+	if err != nil {
+		tflog.Warn(ctx, "Could not read back chart after creation", map[string]interface{}{
+			"id":    chartID,
+			"error": err.Error(),
+		})
+	} else {
+		// Update computed values from API response
+		plan.DatasourceType = types.StringValue(chart.DatasourceType)
+		plan.VizType = types.StringValue(chart.VizType)
+	}
 
 	tflog.Debug(ctx, "Created chart", map[string]interface{}{
 		"id": chartID,
