@@ -1846,7 +1846,9 @@ func (c *Client) GetChart(id int64) (*Chart, error) {
 	}
 
 	// Fallback: try to get from params if query_context didn't work
-	if chart.DatasourceID == 0 {
+	// Some Superset versions return an empty datasource.type even when datasource.id is present.
+	// In that case, fall back to parsing params' "datasource" ("<id>__<type>") too.
+	if chart.DatasourceID == 0 || chart.DatasourceType == "" {
 		if params, ok := result.Result["params"].(string); ok && params != "" {
 			var p struct {
 				Datasource string `json:"datasource"` // format: "10__table"
@@ -2029,6 +2031,28 @@ func (c *Client) GetAllDashboards() ([]map[string]interface{}, error) {
 	return result.Result, nil
 }
 
+// GetDashboardIDBySlug finds dashboard ID by slug using the dashboards list endpoint.
+func (c *Client) GetDashboardIDBySlug(slug string) (int64, error) {
+	if slug == "" {
+		return 0, fmt.Errorf("slug is empty")
+	}
+
+	dashboards, err := c.GetAllDashboards()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch dashboards: %w", err)
+	}
+
+	for _, d := range dashboards {
+		if s, ok := d["slug"].(string); ok && s == slug {
+			if id, ok := d["id"].(float64); ok {
+				return int64(id), nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("dashboard with slug '%s' not found", slug)
+}
+
 // GetDashboard fetches a specific dashboard by ID.
 func (c *Client) GetDashboard(id int64) (*Dashboard, error) {
 	endpoint := fmt.Sprintf("/api/v1/dashboard/%d", id)
@@ -2126,6 +2150,29 @@ func mergePositionsIntoMetadata(jsonMetadata, positionJSON string) string {
 
 // CreateDashboard creates a new dashboard in Superset.
 func (c *Client) CreateDashboard(req DashboardCreateRequest) (int64, error) {
+	// Idempotency: slug is unique in Superset. If a dashboard already exists with
+	// the requested slug, update it and return its ID.
+	if req.Slug != "" {
+		existingID, err := c.GetDashboardIDBySlug(req.Slug)
+		if err == nil && existingID > 0 {
+			published := req.Published
+			updateReq := DashboardUpdateRequest{
+				DashboardTitle: req.DashboardTitle,
+				Slug:           req.Slug,
+				Published:      &published,
+				JsonMetadata:   req.JsonMetadata,
+				PositionJSON:   req.PositionJSON,
+				CSS:            req.CSS,
+				CertifiedBy:    req.CertifiedBy,
+				CertDetails:    req.CertDetails,
+			}
+			if updateErr := c.UpdateDashboard(existingID, updateReq); updateErr != nil {
+				return 0, fmt.Errorf("dashboard with slug '%s' already exists (id=%d) but update failed: %w", req.Slug, existingID, updateErr)
+			}
+			return existingID, nil
+		}
+	}
+
 	csrfToken, cookies, err := c.GetCSRFToken()
 	if err != nil {
 		return 0, err

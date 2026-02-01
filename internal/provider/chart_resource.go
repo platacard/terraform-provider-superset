@@ -181,7 +181,12 @@ func (r *chartResource) Create(ctx context.Context, req resource.CreateRequest, 
 		})
 	} else {
 		// Update computed values from API response
-		plan.DatasourceType = types.StringValue(chart.DatasourceType)
+		// Some Superset versions can return an empty datasource type even when the chart
+		// is backed by a dataset. Preserve the planned/default value (usually "table")
+		// instead of writing an empty string into state.
+		if chart.DatasourceType != "" {
+			plan.DatasourceType = types.StringValue(chart.DatasourceType)
+		}
 		plan.VizType = types.StringValue(chart.VizType)
 	}
 
@@ -220,7 +225,12 @@ func (r *chartResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	// Update state from API response
 	state.SliceName = types.StringValue(chart.SliceName)
 	state.DatasourceID = types.Int64Value(chart.DatasourceID)
-	state.DatasourceType = types.StringValue(chart.DatasourceType)
+	if chart.DatasourceType != "" {
+		state.DatasourceType = types.StringValue(chart.DatasourceType)
+	} else {
+		// Keep Terraform default ("table") instead of empty.
+		state.DatasourceType = types.StringValue("table")
+	}
 	state.VizType = types.StringValue(chart.VizType)
 
 	if chart.Description != "" {
@@ -229,10 +239,15 @@ func (r *chartResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		state.Description = types.StringNull()
 	}
 
-	if chart.Params != "" {
-		state.Params = types.StringValue(chart.Params)
-	} else {
-		state.Params = types.StringNull()
+	// Avoid perpetual diffs:
+	// Superset may store/return JSON strings with different formatting or server-side defaults.
+	// If the user configured params, keep the configured value in state.
+	if state.Params.IsNull() || state.Params.IsUnknown() {
+		if chart.Params != "" {
+			state.Params = types.StringValue(chart.Params)
+		} else {
+			state.Params = types.StringNull()
+		}
 	}
 
 	if chart.CacheTimeout != nil {

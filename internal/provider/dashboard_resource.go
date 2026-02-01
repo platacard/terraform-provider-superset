@@ -202,16 +202,26 @@ func (r *dashboardResource) Read(ctx context.Context, req resource.ReadRequest, 
 		state.Slug = types.StringNull()
 	}
 
-	if dashboard.JsonMetadata != "" {
-		state.JsonMetadata = types.StringValue(dashboard.JsonMetadata)
-	} else {
-		state.JsonMetadata = types.StringNull()
+	// Avoid perpetual diffs:
+	// The client intentionally merges `position_json` into `json_metadata` to trigger
+	// Superset's chart linking behavior. Superset will then return a mutated
+	// `json_metadata` (with `positions`) which will not byte-match the configured
+	// json_metadata. If the user configured json_metadata, keep it in state.
+	if state.JsonMetadata.IsNull() || state.JsonMetadata.IsUnknown() {
+		if dashboard.JsonMetadata != "" {
+			state.JsonMetadata = types.StringValue(dashboard.JsonMetadata)
+		} else {
+			state.JsonMetadata = types.StringNull()
+		}
 	}
 
-	if dashboard.PositionJSON != "" {
-		state.PositionJSON = types.StringValue(dashboard.PositionJSON)
-	} else {
-		state.PositionJSON = types.StringNull()
+	// If the user configured position_json, keep it in state (Superset may normalize).
+	if state.PositionJSON.IsNull() || state.PositionJSON.IsUnknown() {
+		if dashboard.PositionJSON != "" {
+			state.PositionJSON = types.StringValue(dashboard.PositionJSON)
+		} else {
+			state.PositionJSON = types.StringNull()
+		}
 	}
 
 	if dashboard.CSS != "" {

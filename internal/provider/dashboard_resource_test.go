@@ -71,6 +71,11 @@ func TestAccDashboardResource(t *testing.T) {
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 		httpmock.NewStringResponder(200, mockLoginResponse))
 
+	// CreateDashboard now checks for existing dashboards by slug (idempotency).
+	// For this test, return an empty list so the provider proceeds with POST create.
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/dashboard/?q=(page_size:5000)",
+		httpmock.NewStringResponder(200, `{"result":[]}`))
+
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dashboard/",
 		httpmock.NewStringResponder(201, mockDashboardCreateResponse))
 
@@ -161,6 +166,7 @@ func TestAccDashboardResourceMinimal(t *testing.T) {
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 		httpmock.NewStringResponder(200, mockLoginResponse))
 
+	// Minimal config has no slug, so CreateDashboard won't query dashboards list.
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dashboard/",
 		httpmock.NewStringResponder(201, mockDashboardCreateResponse))
 
@@ -221,6 +227,11 @@ func TestAccDashboardResourceWithMetadata(t *testing.T) {
 	// Setup mocks
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 		httpmock.NewStringResponder(200, mockLoginResponse))
+
+	// CreateDashboard now checks for existing dashboards by slug (idempotency).
+	// For this test, return an empty list so the provider proceeds with POST create.
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/dashboard/?q=(page_size:5000)",
+		httpmock.NewStringResponder(200, `{"result":[]}`))
 
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dashboard/",
 		httpmock.NewStringResponder(201, mockDashboardCreateResponse))
