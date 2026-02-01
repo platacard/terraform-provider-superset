@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -187,20 +188,35 @@ func (r *databaseResource) Create(ctx context.Context, req resource.CreateReques
 		)
 		return
 	}
-	if val, ok := resultData["allow_ctas"].(bool); ok {
-		plan.AllowCTAS = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_cvas"].(bool); ok {
-		plan.AllowCVAS = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_dml"].(bool); ok {
-		plan.AllowDML = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_run_async"].(bool); ok {
-		plan.AllowRunAsync = types.BoolValue(val)
-	}
-	if val, ok := resultData["expose_in_sqllab"].(bool); ok {
-		plan.ExposeInSQLLab = types.BoolValue(val)
+
+	// NOTE: Superset may override these flags based on engine/capabilities.
+	// If we copy the API response into state for non-computed attributes,
+	// OpenTofu/Terraform will error with "Provider produced inconsistent result after apply".
+	// So we keep the planned values in state and only emit a warning if Superset disagrees.
+	{
+		var diffs []string
+		if actual, ok := resultData["allow_ctas"].(bool); ok && actual != plan.AllowCTAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_ctas desired=%t actual=%t", plan.AllowCTAS.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_cvas"].(bool); ok && actual != plan.AllowCVAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_cvas desired=%t actual=%t", plan.AllowCVAS.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_dml"].(bool); ok && actual != plan.AllowDML.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_dml desired=%t actual=%t", plan.AllowDML.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_run_async"].(bool); ok && actual != plan.AllowRunAsync.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_run_async desired=%t actual=%t", plan.AllowRunAsync.ValueBool(), actual))
+		}
+		if actual, ok := resultData["expose_in_sqllab"].(bool); ok && actual != plan.ExposeInSQLLab.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("expose_in_sqllab desired=%t actual=%t", plan.ExposeInSQLLab.ValueBool(), actual))
+		}
+		if len(diffs) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Superset database flags not honored by API",
+				"Superset returned different values than requested: "+strings.Join(diffs, ", ")+". "+
+					"This may be an API limitation or engine/capability override; continuing with the planned state to avoid inconsistent apply errors.",
+			)
+		}
 	}
 
 	diags = resp.State.Set(ctx, &plan)
@@ -255,20 +271,33 @@ func (r *databaseResource) Read(ctx context.Context, req resource.ReadRequest, r
 		)
 		return
 	}
-	if val, ok := result["allow_ctas"].(bool); ok {
-		state.AllowCTAS = types.BoolValue(val)
-	}
-	if val, ok := result["allow_cvas"].(bool); ok {
-		state.AllowCVAS = types.BoolValue(val)
-	}
-	if val, ok := result["allow_dml"].(bool); ok {
-		state.AllowDML = types.BoolValue(val)
-	}
-	if val, ok := result["allow_run_async"].(bool); ok {
-		state.AllowRunAsync = types.BoolValue(val)
-	}
-	if val, ok := result["expose_in_sqllab"].(bool); ok {
-		state.ExposeInSQLLab = types.BoolValue(val)
+
+	// Do not overwrite these fields from the API to avoid "inconsistent result after apply"
+	// when Superset overrides user-configured values. Instead, warn if there's a mismatch.
+	{
+		var diffs []string
+		if actual, ok := result["allow_ctas"].(bool); ok && actual != state.AllowCTAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_ctas desired=%t actual=%t", state.AllowCTAS.ValueBool(), actual))
+		}
+		if actual, ok := result["allow_cvas"].(bool); ok && actual != state.AllowCVAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_cvas desired=%t actual=%t", state.AllowCVAS.ValueBool(), actual))
+		}
+		if actual, ok := result["allow_dml"].(bool); ok && actual != state.AllowDML.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_dml desired=%t actual=%t", state.AllowDML.ValueBool(), actual))
+		}
+		if actual, ok := result["allow_run_async"].(bool); ok && actual != state.AllowRunAsync.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_run_async desired=%t actual=%t", state.AllowRunAsync.ValueBool(), actual))
+		}
+		if actual, ok := result["expose_in_sqllab"].(bool); ok && actual != state.ExposeInSQLLab.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("expose_in_sqllab desired=%t actual=%t", state.ExposeInSQLLab.ValueBool(), actual))
+		}
+		if len(diffs) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Superset database flags differ from API",
+				"Superset reports different values than configured: "+strings.Join(diffs, ", ")+". "+
+					"This may indicate an API limitation or engine/capability override.",
+			)
+		}
 	}
 	if val, ok := result["backend"].(string); ok {
 		state.DBEngine = types.StringValue(val)
@@ -362,38 +391,46 @@ func (r *databaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Update state attributes with the values from the response
-	if val, ok := resultData["database_name"].(string); ok {
-		state.ConnectionName = types.StringValue(val)
-	} else {
-		resp.Diagnostics.AddError(
-			"Invalid Response",
-			"The response from the API does not contain a valid 'database_name' field",
-		)
-		return
-	}
-	if val, ok := resultData["allow_ctas"].(bool); ok {
-		state.AllowCTAS = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_cvas"].(bool); ok {
-		state.AllowCVAS = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_dml"].(bool); ok {
-		state.AllowDML = types.BoolValue(val)
-	}
-	if val, ok := resultData["allow_run_async"].(bool); ok {
-		state.AllowRunAsync = types.BoolValue(val)
-	}
-	if val, ok := resultData["expose_in_sqllab"].(bool); ok {
-		state.ExposeInSQLLab = types.BoolValue(val)
+	// Warn if the API returned different values than requested.
+	{
+		var diffs []string
+		if actual, ok := resultData["allow_ctas"].(bool); ok && actual != plan.AllowCTAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_ctas desired=%t actual=%t", plan.AllowCTAS.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_cvas"].(bool); ok && actual != plan.AllowCVAS.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_cvas desired=%t actual=%t", plan.AllowCVAS.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_dml"].(bool); ok && actual != plan.AllowDML.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_dml desired=%t actual=%t", plan.AllowDML.ValueBool(), actual))
+		}
+		if actual, ok := resultData["allow_run_async"].(bool); ok && actual != plan.AllowRunAsync.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("allow_run_async desired=%t actual=%t", plan.AllowRunAsync.ValueBool(), actual))
+		}
+		if actual, ok := resultData["expose_in_sqllab"].(bool); ok && actual != plan.ExposeInSQLLab.ValueBool() {
+			diffs = append(diffs, fmt.Sprintf("expose_in_sqllab desired=%t actual=%t", plan.ExposeInSQLLab.ValueBool(), actual))
+		}
+		if len(diffs) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Superset database flags not honored by API",
+				"Superset returned different values than requested: "+strings.Join(diffs, ", ")+". "+
+					"This may be an API limitation or engine/capability override; continuing with the planned state to avoid inconsistent apply errors.",
+			)
+		}
 	}
 
+	// Keep the planned values in state to avoid inconsistent apply errors.
+	state.ConnectionName = types.StringValue(plan.ConnectionName.ValueString())
 	state.DBEngine = types.StringValue(plan.DBEngine.ValueString())
 	state.DBUser = types.StringValue(plan.DBUser.ValueString())
 	state.DBPass = types.StringValue(plan.DBPass.ValueString())
 	state.DBHost = types.StringValue(plan.DBHost.ValueString())
 	state.DBPort = types.Int64Value(plan.DBPort.ValueInt64())
 	state.DBName = types.StringValue(plan.DBName.ValueString())
+	state.AllowCTAS = types.BoolValue(plan.AllowCTAS.ValueBool())
+	state.AllowCVAS = types.BoolValue(plan.AllowCVAS.ValueBool())
+	state.AllowDML = types.BoolValue(plan.AllowDML.ValueBool())
+	state.AllowRunAsync = types.BoolValue(plan.AllowRunAsync.ValueBool())
+	state.ExposeInSQLLab = types.BoolValue(plan.ExposeInSQLLab.ValueBool())
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
