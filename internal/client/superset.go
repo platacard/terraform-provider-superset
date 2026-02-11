@@ -868,12 +868,22 @@ type DatasetRequest struct {
 
 // CreateDataset creates a new dataset in Superset.
 func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{}, error) {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := "/api/v1/dataset/"
 
 	// Debug: log the request payload
 	fmt.Printf("DEBUG CreateDataset: Sending request to %s with payload: %+v\n", endpoint, dataset)
 
-	resp, err := c.DoRequest("POST", endpoint, dataset)
+	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, dataset, headers, cookies)
 	if err != nil {
 		return nil, err
 	}
@@ -940,6 +950,16 @@ type DatasetUpdateRequest struct {
 
 // UpdateDataset updates an existing dataset (database field cannot be changed).
 func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
 
 	updateReq := DatasetUpdateRequest{
@@ -951,7 +971,7 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 	// Debug: log the update request payload
 	fmt.Printf("DEBUG UpdateDataset: Sending UPDATE request to %s with payload: %+v\n", endpoint, updateReq)
 
-	resp, err := c.DoRequest("PUT", endpoint, updateReq)
+	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, updateReq, headers, cookies)
 	if err != nil {
 		return err
 	}
@@ -967,8 +987,18 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 
 // DeleteDataset deletes a dataset by ID.
 func (c *Client) DeleteDataset(id int64) error {
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
-	resp, err := c.DoRequest("DELETE", endpoint, nil)
+	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", endpoint, nil, headers, cookies)
 	if err != nil {
 		return err
 	}

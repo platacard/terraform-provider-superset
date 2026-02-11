@@ -399,7 +399,7 @@ resource "superset_meta_database" "test" {
     "db1",
     "db2"
   ]
-  
+
   expose_in_sqllab      = true
   allow_ctas            = false
   allow_cvas            = false
@@ -419,7 +419,7 @@ resource "superset_meta_database" "test" {
     "db2",
     "db3"
   ]
-  
+
   expose_in_sqllab      = false
   allow_ctas            = false
   allow_cvas            = false
@@ -438,7 +438,7 @@ resource "superset_meta_database" "existing" {
     "new_db1",
     "new_db2"
   ]
-  
+
   expose_in_sqllab      = true
   allow_ctas            = false
   allow_cvas            = false

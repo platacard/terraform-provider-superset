@@ -38,7 +38,7 @@ func TestAccDatasetResource(t *testing.T) {
 			},
 			{
 				"id": 3,
-				"database_name": "SQLite Database", 
+				"database_name": "SQLite Database",
 				"backend": "sqlite"
 			},
 			{
@@ -191,7 +191,7 @@ func TestAccDatasetResourceWithSQL(t *testing.T) {
 			},
 			{
 				"id": 3,
-				"database_name": "SQLite Database", 
+				"database_name": "SQLite Database",
 				"backend": "sqlite"
 			},
 			{
