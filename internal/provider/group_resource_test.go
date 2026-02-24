@@ -24,11 +24,11 @@ func TestAccGroupResource(t *testing.T) {
 		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
 	// Mock create group
-	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/group/",
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/groups/",
 		httpmock.NewStringResponder(201, `{"id": 50}`))
 
 	// Mock get group (dynamic)
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/group/50",
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/groups/50",
 		func(req *http.Request) (*http.Response, error) {
 			rolesJSON, _ := json.Marshal(groupRoles)
 			usersJSON, _ := json.Marshal(groupUsers)
@@ -45,7 +45,7 @@ func TestAccGroupResource(t *testing.T) {
 		})
 
 	// Mock update group (updates state)
-	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/security/group/50",
+	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/security/groups/50",
 		func(req *http.Request) (*http.Response, error) {
 			var updateData map[string]interface{}
 			if err := json.NewDecoder(req.Body).Decode(&updateData); err == nil {
@@ -73,7 +73,7 @@ func TestAccGroupResource(t *testing.T) {
 		})
 
 	// Mock delete group
-	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/security/group/50",
+	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/security/groups/50",
 		httpmock.NewStringResponder(204, ""))
 
 	resource.Test(t, resource.TestCase{

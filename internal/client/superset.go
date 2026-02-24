@@ -1519,7 +1519,7 @@ type rawGroupModel struct {
 
 // FetchGroups fetches the groups from the Superset API.
 func (c *Client) FetchGroups() ([]rawGroupModel, error) {
-	endpoint := "/api/v1/security/group/?q=(page_size:5000)"
+	endpoint := "/api/v1/security/groups/?q=(page_size:5000)"
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1544,7 +1544,7 @@ func (c *Client) FetchGroups() ([]rawGroupModel, error) {
 
 // GetGroup retrieves a group by its ID from the Superset API.
 func (c *Client) GetGroup(id int64) (*Group, error) {
-	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	endpoint := fmt.Sprintf("/api/v1/security/groups/%d", id)
 	resp, err := c.DoRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error making GET request to %s: %v", endpoint, err)
@@ -1591,7 +1591,7 @@ func (c *Client) GetGroup(id int64) (*Group, error) {
 
 // CreateGroup creates a group with the specified parameters in the Superset application.
 func (c *Client) CreateGroup(name string, roles []int64, users []int64) (int64, error) {
-	endpoint := "/api/v1/security/group/"
+	endpoint := "/api/v1/security/groups/"
 	payload := map[string]interface{}{
 		"name":  name,
 		"roles": roles,
@@ -1625,7 +1625,7 @@ func (c *Client) CreateGroup(name string, roles []int64, users []int64) (int64, 
 
 // UpdateGroup updates the group with the specified ID.
 func (c *Client) UpdateGroup(id int64, name string, roles []int64, users []int64) error {
-	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	endpoint := fmt.Sprintf("/api/v1/security/groups/%d", id)
 	payload := map[string]interface{}{
 		"name":  name,
 		"roles": roles,
@@ -1648,7 +1648,7 @@ func (c *Client) UpdateGroup(id int64, name string, roles []int64, users []int64
 
 // DeleteGroup deletes a group with the specified ID from the Superset server.
 func (c *Client) DeleteGroup(id int64) error {
-	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	endpoint := fmt.Sprintf("/api/v1/security/groups/%d", id)
 	resp, err := c.DoRequest("DELETE", endpoint, nil)
 	if err != nil {
 		return err

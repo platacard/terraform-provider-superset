@@ -16,7 +16,7 @@ func TestAccGroupsDataSource(t *testing.T) {
 		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
 	// Mock fetch groups
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/group/?q=(page_size:5000)",
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/groups/?q=(page_size:5000)",
 		httpmock.NewStringResponder(200, `{
 			"result": [
 				{"id": 1, "name": "Group A"},
