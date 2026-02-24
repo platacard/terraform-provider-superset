@@ -12,26 +12,29 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
 )
 
+// Ensure the implementation satisfies the expected interfaces.
 var (
 	_ resource.Resource                = &groupResource{}
 	_ resource.ResourceWithConfigure   = &groupResource{}
 	_ resource.ResourceWithImportState = &groupResource{}
 )
 
+// NewGroupResource is a helper function to simplify the provider implementation.
 func NewGroupResource() resource.Resource {
 	return &groupResource{}
 }
 
+// groupResource is the resource implementation.
 type groupResource struct {
 	client *client.Client
 }
 
+// groupResourceModel maps the resource schema data.
 type groupResourceModel struct {
 	ID          types.Int64  `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
@@ -40,10 +43,12 @@ type groupResourceModel struct {
 	LastUpdated types.String `tfsdk:"last_updated"`
 }
 
+// Metadata returns the resource type name.
 func (r *groupResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_group"
 }
 
+// Schema defines the schema for the resource.
 func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a group in Superset.",
@@ -78,14 +83,12 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"last_updated": schema.StringAttribute{
 				Description: "Timestamp of the last update.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 	}
 }
 
+// Create creates the resource and sets the initial Terraform state.
 func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	tflog.Debug(ctx, "Starting Create method")
 	var plan groupResourceModel
@@ -126,6 +129,7 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tflog.Debug(ctx, fmt.Sprintf("Created group: ID=%d, Name=%s", plan.ID.ValueInt64(), plan.Name.ValueString()))
 }
 
+// Read refreshes the Terraform state with the latest data from Superset.
 func (r *groupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	tflog.Debug(ctx, "Starting Read method")
 	var state groupResourceModel
@@ -169,6 +173,7 @@ func (r *groupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	resp.Diagnostics.Append(diags...)
 }
 
+// Update updates the resource and sets the updated Terraform state on success.
 func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	tflog.Debug(ctx, "Starting Update method")
 	var plan groupResourceModel
@@ -209,6 +214,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tflog.Debug(ctx, fmt.Sprintf("Updated group: ID=%d, Name=%s", plan.ID.ValueInt64(), plan.Name.ValueString()))
 }
 
+// Delete deletes the resource and removes the Terraform state on success.
 func (r *groupResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	tflog.Debug(ctx, "Starting Delete method")
 	var state groupResourceModel
@@ -236,6 +242,7 @@ func (r *groupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	tflog.Debug(ctx, fmt.Sprintf("Deleted group: ID=%d", state.ID.ValueInt64()))
 }
 
+// ImportState imports an existing resource.
 func (r *groupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	tflog.Debug(ctx, "Starting ImportState method", map[string]interface{}{
 		"import_id": req.ID,
@@ -257,6 +264,7 @@ func (r *groupResource) ImportState(ctx context.Context, req resource.ImportStat
 	})
 }
 
+// Configure adds the provider configured client to the resource.
 func (r *groupResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
