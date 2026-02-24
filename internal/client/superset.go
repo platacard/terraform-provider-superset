@@ -1494,3 +1494,171 @@ func (c *Client) DeleteUser(id int64) error {
 
 	return nil
 }
+
+// Group represents a group in the Superset application.
+type Group struct {
+	ID    int64   `json:"id"`
+	Name  string  `json:"name"`
+	Roles []int64 `json:"roles,omitempty"`
+	Users []int64 `json:"users,omitempty"`
+}
+
+// rawGroupModel represents a raw group model from the Superset API.
+type rawGroupModel struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Roles []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	} `json:"roles"`
+	Users []struct {
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
+	} `json:"users"`
+}
+
+// FetchGroups fetches the groups from the Superset API.
+func (c *Client) FetchGroups() ([]rawGroupModel, error) {
+	endpoint := "/api/v1/security/group/?q=(page_size:5000)"
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch groups from Superset, status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Groups []rawGroupModel `json:"result"`
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Groups, nil
+}
+
+// GetGroup retrieves a group by its ID from the Superset API.
+func (c *Client) GetGroup(id int64) (*Group, error) {
+	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	resp, err := c.DoRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error making GET request to %s: %v", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch group, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	var result struct {
+		ID     int64         `json:"id"`
+		Result rawGroupModel `json:"result"`
+	}
+
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling response to struct: %v", err)
+	}
+
+	group := &Group{
+		ID:    result.Result.ID,
+		Name:  result.Result.Name,
+		Roles: make([]int64, len(result.Result.Roles)),
+		Users: make([]int64, len(result.Result.Users)),
+	}
+
+	for i, role := range result.Result.Roles {
+		group.Roles[i] = role.ID
+	}
+
+	for i, user := range result.Result.Users {
+		group.Users[i] = user.ID
+	}
+
+	return group, nil
+}
+
+// CreateGroup creates a group with the specified parameters in the Superset application.
+func (c *Client) CreateGroup(name string, roles []int64, users []int64) (int64, error) {
+	endpoint := "/api/v1/security/group/"
+	payload := map[string]interface{}{
+		"name":  name,
+		"roles": roles,
+		"users": users,
+	}
+
+	resp, err := c.DoRequest("POST", endpoint, payload)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to create group, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	id, ok := result["id"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("failed to retrieve group ID from response")
+	}
+
+	return int64(id), nil
+}
+
+// UpdateGroup updates the group with the specified ID.
+func (c *Client) UpdateGroup(id int64, name string, roles []int64, users []int64) error {
+	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	payload := map[string]interface{}{
+		"name":  name,
+		"roles": roles,
+		"users": users,
+	}
+
+	resp, err := c.DoRequest("PUT", endpoint, payload)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update group, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteGroup deletes a group with the specified ID from the Superset server.
+func (c *Client) DeleteGroup(id int64) error {
+	endpoint := fmt.Sprintf("/api/v1/security/group/%d", id)
+	resp, err := c.DoRequest("DELETE", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete group, status code: %d, response: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
