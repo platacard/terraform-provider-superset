@@ -198,11 +198,15 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 	tflog.Debug(ctx, "Create method completed successfully")
 }
 
+// permissionSetKey builds a lookup key for a permission+view_menu pair.
+func permissionSetKey(permission, viewMenu string) string {
+	return permission + "|" + viewMenu
+}
+
 // Read refreshes the Terraform state with the latest data.
 func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	tflog.Debug(ctx, "Starting Read method")
 
-	// Get current state
 	var state rolePermissionsResourceModel
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -210,11 +214,6 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	tflog.Debug(ctx, "State obtained", map[string]interface{}{
-		"roleName": state.RoleName.ValueString(),
-	})
-
-	// Get role ID
 	roleID, err := r.client.GetRoleIDByName(state.RoleName.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -224,11 +223,6 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	tflog.Debug(ctx, "Role ID obtained", map[string]interface{}{
-		"roleID": roleID,
-	})
-
-	// Get permissions from Superset
 	permissions, err := r.client.GetRolePermissions(roleID)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -238,78 +232,59 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	tflog.Debug(ctx, "Permissions fetched from Superset", map[string]interface{}{
-		"permissions": permissions,
-	})
-
-	// Map permissions to resource model
-	var resourcePermissions []resourcePermissionModel
+	// Build lookup map from API response keyed by "permission|view_menu"
+	apiPermMap := make(map[string]client.Permission)
 	for _, perm := range permissions {
-		tflog.Debug(ctx, "Processing fetched permission", map[string]interface{}{
-			"ID":         perm.ID,
-			"Permission": perm.PermissionName,
-			"ViewMenu":   perm.ViewMenuName,
-		})
+		key := permissionSetKey(perm.PermissionName, perm.ViewMenuName)
+		apiPermMap[key] = perm
+	}
 
-		// Create mapped permission
-		mappedPermission := resourcePermissionModel{
-			ID:         types.Int64Value(perm.ID),
-			Permission: types.StringValue(perm.PermissionName),
-			ViewMenu:   types.StringValue(perm.ViewMenuName),
+	// Build set of state keys for comparison
+	stateKeys := make(map[string]bool)
+	for _, sp := range state.ResourcePermissions {
+		key := permissionSetKey(sp.Permission.ValueString(), sp.ViewMenu.ValueString())
+		stateKeys[key] = true
+	}
+
+	// Check if the set of permissions is identical (same keys, same count)
+	setsMatch := len(stateKeys) == len(apiPermMap)
+	if setsMatch {
+		for key := range stateKeys {
+			if _, ok := apiPermMap[key]; !ok {
+				setsMatch = false
+				break
+			}
 		}
-
-		// Verify mapping immediately after setting the values
-		tflog.Debug(ctx, "Mapped Permission", map[string]interface{}{
-			"ID":         mappedPermission.ID.ValueInt64(),
-			"Permission": mappedPermission.Permission.ValueString(),
-			"ViewMenu":   mappedPermission.ViewMenu.ValueString(),
-		})
-
-		resourcePermissions = append(resourcePermissions, mappedPermission)
 	}
 
-	// Debug full content of resourcePermissions by converting to a slice of maps
-	var debugResourcePermissions []map[string]interface{}
-	for _, rp := range resourcePermissions {
-		debugResourcePermissions = append(debugResourcePermissions, map[string]interface{}{
-			"ID":         rp.ID.ValueInt64(),
-			"Permission": rp.Permission.ValueString(),
-			"ViewMenu":   rp.ViewMenu.ValueString(),
-		})
+	if setsMatch {
+		tflog.Debug(ctx, "Permission sets match, preserving state ordering")
+		// Same permissions, possibly different order from API.
+		// Preserve existing state order, only update computed IDs.
+		for i, sp := range state.ResourcePermissions {
+			key := permissionSetKey(sp.Permission.ValueString(), sp.ViewMenu.ValueString())
+			if apiPerm, ok := apiPermMap[key]; ok {
+				state.ResourcePermissions[i].ID = types.Int64Value(apiPerm.ID)
+			}
+		}
+	} else {
+		tflog.Debug(ctx, "Permission sets differ, rebuilding state from API response")
+		// Permissions actually changed: rebuild from API response
+		var resourcePermissions []resourcePermissionModel
+		for _, perm := range permissions {
+			resourcePermissions = append(resourcePermissions, resourcePermissionModel{
+				ID:         types.Int64Value(perm.ID),
+				Permission: types.StringValue(perm.PermissionName),
+				ViewMenu:   types.StringValue(perm.ViewMenuName),
+			})
+		}
+		state.ResourcePermissions = resourcePermissions
 	}
 
-	tflog.Debug(ctx, "Full content of resourcePermissions", map[string]interface{}{
-		"resourcePermissions": debugResourcePermissions,
-	})
-
-	// Verify the final mapped permissions
-	// sort.Slice(resourcePermissions, func(i, j int) bool {
-	// 	return resourcePermissions[i].ID.ValueInt64() < resourcePermissions[j].ID.ValueInt64()
-	// })
-
-	for _, rp := range resourcePermissions {
-		tflog.Debug(ctx, "Mapped Permission in List", map[string]interface{}{
-			"ID":         rp.ID.ValueInt64(),
-			"Permission": rp.Permission.ValueString(),
-			"ViewMenu":   rp.ViewMenu.ValueString(),
-		})
-	}
-
-	tflog.Debug(ctx, "Final Permissions mapped to resource model", map[string]interface{}{
-		"resourcePermissions": debugResourcePermissions,
-	})
-
-	// Overwrite state with refreshed values
-	state.ResourcePermissions = resourcePermissions
-	state.LastUpdated = types.StringValue(time.Now().Format(time.RFC3339))
+	// Do NOT update last_updated in Read - it should only change on Create/Update
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	tflog.Debug(ctx, "Read method completed successfully")
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
