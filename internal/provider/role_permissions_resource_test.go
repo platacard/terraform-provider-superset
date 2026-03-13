@@ -210,4 +210,69 @@ func TestAccRolePermissionsResource(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("ReadPreservesOrderNoDrift", func(t *testing.T) {
+		httpmock.Activate()
+		defer httpmock.DeactivateAndReset()
+
+		httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
+			httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
+
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
+			httpmock.NewStringResponder(200, `{"result": [{"id": 129, "name": "DWH-DB-Connect"}]}`))
+
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/permissions-resources?q=(page_size:5000)",
+			httpmock.NewStringResponder(200, `{"result": [
+				{"id": 240, "permission": {"name": "database_access"}, "view_menu": {"name": "[SelfPostgreSQL].(id:1)"}},
+				{"id": 241, "permission": {"name": "schema_access"}, "view_menu": {"name": "[Trino].[devoriginationzestorage]"}}
+			]}`))
+
+		httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/roles/129/permissions",
+			httpmock.NewStringResponder(200, `{"status": "success"}`))
+
+		// API returns permissions in REVERSED order from config
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles/129/permissions/",
+			httpmock.NewStringResponder(200, `{"result": [
+				{"id": 241, "permission_name": "schema_access", "view_menu_name": "[Trino].[devoriginationzestorage]"},
+				{"id": 240, "permission_name": "database_access", "view_menu_name": "[SelfPostgreSQL].(id:1)"}
+			]}`))
+
+		httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/security/roles/129/permissions",
+			httpmock.NewStringResponder(204, ""))
+
+		config := providerConfig + `
+resource "superset_role_permissions" "team" {
+  role_name            = "DWH-DB-Connect"
+  resource_permissions = [
+    {
+      permission = "database_access"
+      view_menu  = "[SelfPostgreSQL].(id:1)"
+    },
+    {
+      permission = "schema_access"
+      view_menu  = "[Trino].[devoriginationzestorage]"
+    },
+  ]
+}
+`
+
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: config,
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("superset_role_permissions.team", "resource_permissions.#", "2"),
+						resource.TestCheckResourceAttr("superset_role_permissions.team", "resource_permissions.0.permission", "database_access"),
+						resource.TestCheckResourceAttr("superset_role_permissions.team", "resource_permissions.1.permission", "schema_access"),
+					),
+				},
+				{
+					Config:   config,
+					PlanOnly: true,
+				},
+			},
+		})
+	})
+	
 }
