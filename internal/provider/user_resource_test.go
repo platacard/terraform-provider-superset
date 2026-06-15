@@ -23,6 +23,10 @@ func TestAccUserResource(t *testing.T) {
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
+	// Mock the CSRF token endpoint (required for all write operations)
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
+
 	// Mock the Superset API response for creating users
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/users/",
 		httpmock.NewStringResponder(201, `{"id": 100}`))
