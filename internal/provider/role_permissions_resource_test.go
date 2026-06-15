@@ -17,6 +17,10 @@ func TestAccRolePermissionsResource(t *testing.T) {
 		httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 			httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
+		// Mock the CSRF token endpoint (required for all write operations)
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+			httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
+
 		// Mock the Superset API response for reading roles by ID
 		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles/129",
 			httpmock.NewStringResponder(200, `{"result": {"id": 129, "name": "DWH-DB-Connect"}}`))
@@ -110,6 +114,10 @@ func TestAccRolePermissionsResource(t *testing.T) {
 		// Mock the Superset API login response
 		httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 			httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
+
+		// Mock the CSRF token endpoint (required for all write operations)
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+			httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
 		// Mock the Superset API response for fetching roles
 		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
