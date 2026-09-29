@@ -25,6 +25,15 @@ type Client struct {
 	Password string
 	Token    string
 	Cookies  []*http.Cookie
+
+	// permissionCache holds a name->ID map of every permission-resource on this
+	// client's Superset host, keyed by "permission|view_menu". Scoped to the
+	// Client instance (not a package-level global) so that multiple aliased
+	// "superset" provider configurations pointing at different hosts in the
+	// same terraform run never share or collide on each other's permission IDs.
+	permissionCache      map[string]int64
+	permissionCacheTime  time.Time
+	permissionCacheMutex sync.RWMutex
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
@@ -479,32 +488,65 @@ func (c *Client) DeleteRole(id int64) error {
 	return nil
 }
 
-// GetPermissionIDByNameAndView retrieves the ID of a permission by its name and view menu name.
-// It sends a GET request to the Superset API to fetch the permissions resources and searches for the resource
-// that matches the given permission name and view menu name. If a match is found, it returns the ID of the resource.
-// If no match is found, it returns an error indicating that the permission with the given name and view menu name was not found.
+// Cache for permission-resource ID lookups, scoped per Client instance (see the
+// permissionCache fields on Client) to avoid re-crawling the full
+// permissions-resources list (11,000+ rows on large Superset instances) for every
+// single permission referenced across every role in a terraform run.
+const permissionCacheTTL = 5 * time.Minute
+
+// permissionCacheKey builds the lookup key for a permission+view_menu pair.
+func permissionCacheKey(permissionName, viewMenuName string) string {
+	return permissionName + "|" + viewMenuName
+}
+
+// ensurePermissionCache fetches every permission-resource from Superset exactly once
+// (per cache TTL window) and builds a name->ID map, keyed by "permission|view_menu".
 //
-// Parameters:
-// - permissionName: The name of the permission to search for.
-// - viewMenuName: The name of the view menu to search for.
+// Superset instances with a large permission surface (custom RBAC roles with many
+// datasource_access/schema_access grants) can exceed 10,000 permission-resources.
+// Superset's default list ordering for this endpoint is unspecified, which made the
+// previous per-lookup paginated crawl (100 rows/page, no explicit ordering) prone to
+// skipping rows whenever the underlying table was touched between page fetches on a
+// live instance -- a low-ID permission like a built-in "TabStateView:can_post" could
+// still be missed if it happened to land outside a shifted page window.
 //
-// Returns:
-// - int64: The ID of the permission resource if found.
-// - error: An error if the request fails or if the permission resource is not found.
-func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
+// The fix: request a large, explicitly-ordered page (order_column=id, ascending) so
+// pagination is deterministic regardless of concurrent writes, and cache the full
+// result set once instead of re-crawling it for every permission lookup.
+func (c *Client) ensurePermissionCache() error {
+	c.permissionCacheMutex.RLock()
+	if c.permissionCache != nil && time.Since(c.permissionCacheTime) < permissionCacheTTL {
+		c.permissionCacheMutex.RUnlock()
+		return nil
+	}
+	c.permissionCacheMutex.RUnlock()
+
+	c.permissionCacheMutex.Lock()
+	defer c.permissionCacheMutex.Unlock()
+
+	// Double-check in case another goroutine already populated the cache while we
+	// were waiting for the write lock.
+	if c.permissionCache != nil && time.Since(c.permissionCacheTime) < permissionCacheTTL {
+		return nil
+	}
+
+	const pageSize = 1000
+	cache := make(map[string]int64)
 	page := 0
-	pageSize := 100
 
 	for {
-		endpoint := fmt.Sprintf("/api/v1/security/permissions-resources?q=(page:%d,page_size:%d)", page, pageSize)
+		endpoint := fmt.Sprintf(
+			"/api/v1/security/permissions-resources?q=(page:%d,page_size:%d,order_column:id,order_direction:asc)",
+			page, pageSize,
+		)
 		resp, err := c.DoRequest("GET", endpoint, nil)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
+			resp.Body.Close()
+			return fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
 		}
 
 		var result struct {
@@ -521,14 +563,13 @@ func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName strin
 		}
 
 		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
 		if err != nil {
-			return 0, err
+			return err
 		}
 
 		for _, resource := range result.Resources {
-			if resource.Permission.Name == permissionName && resource.ViewMenu.Name == viewMenuName {
-				return resource.ID, nil
-			}
+			cache[permissionCacheKey(resource.Permission.Name, resource.ViewMenu.Name)] = resource.ID
 		}
 
 		if len(result.Resources) < pageSize {
@@ -537,7 +578,31 @@ func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName strin
 		page++
 	}
 
-	return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
+	c.permissionCache = cache
+	c.permissionCacheTime = time.Now()
+	return nil
+}
+
+// GetPermissionIDByNameAndView retrieves the ID of a permission by its name and view menu name.
+// It uses a cached, deterministically-ordered full fetch of all permission-resources
+// (see ensurePermissionCache) rather than crawling the paginated list on every call.
+//
+// Returns:
+// - int64: The ID of the permission resource if found.
+// - error: An error if the request fails or if the permission resource is not found.
+func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
+	if err := c.ensurePermissionCache(); err != nil {
+		return 0, err
+	}
+
+	c.permissionCacheMutex.RLock()
+	id, ok := c.permissionCache[permissionCacheKey(permissionName, viewMenuName)]
+	c.permissionCacheMutex.RUnlock()
+
+	if !ok {
+		return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
+	}
+	return id, nil
 }
 
 // UpdateRolePermissions updates the permissions of a role in the Superset application.
