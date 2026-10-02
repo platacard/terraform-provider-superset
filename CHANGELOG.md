@@ -1,3 +1,12 @@
+## 0.4.0 (Unreleased)
+
+FEATURES:
+* provider: New `validate_credentials` attribute (defaults to `true`). When `false`, the provider does not log in on configure and `host`, `username` and `password` may be empty, so it can be declared where Superset is not available.
+
+IMPROVEMENTS:
+* provider: The API client logs in lazily on the first request and shares one access token between concurrent operations.
+* provider: An expired access token (401) is refreshed once and the request is retried, instead of failing long-running applies.
+
 ## 0.3.0 (TBD)
 
 FEATURES:

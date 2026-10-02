@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,34 +20,89 @@ var (
 )
 
 // Client represents a client for Superset API.
+//
+// The client authenticates lazily: no request is sent until the first API call
+// (or an explicit Authenticate call). The access token is shared by all callers
+// and is safe for concurrent use, e.g. when Terraform runs with parallelism > 1.
 type Client struct {
 	Host     string
 	Username string
 	Password string
-	Token    string
-	Cookies  []*http.Cookie
+
+	mu    sync.Mutex
+	token string
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
-// It returns a pointer to the created Client and an error if authentication fails.
-func NewClient(host, username, password string) (*Client, error) {
-	client := &Client{
+// It does not send any request: authentication happens on the first API call or on Authenticate.
+func NewClient(host, username, password string) *Client {
+	return &Client{
 		Host:     host,
 		Username: username,
 		Password: password,
 	}
-
-	err := client.authenticate()
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
 }
 
-// authenticate sends an authentication request to the Superset API using the provided username and password.
-// It returns an error if the authentication fails or if there is an error during the request.
-func (c *Client) authenticate() error {
+// Authenticate logs in to Superset unless the client already holds an access token.
+// It can be used to validate the credentials before any API call is made.
+func (c *Client) Authenticate() error {
+	_, err := c.accessToken()
+	return err
+}
+
+// accessToken returns the current access token, logging in first if there is none yet.
+// Concurrent callers wait for a single login instead of logging in on their own.
+func (c *Client) accessToken() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.token == "" {
+		if err := c.login(); err != nil {
+			return "", err
+		}
+	}
+	return c.token, nil
+}
+
+// refreshAccessToken logs in again after the given token was rejected by Superset.
+// If another caller has already replaced that token, the new one is returned as is.
+func (c *Client) refreshAccessToken(rejected string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.token == rejected {
+		if err := c.login(); err != nil {
+			return "", err
+		}
+	}
+	return c.token, nil
+}
+
+// validateSettings reports the connection settings that are not set.
+func (c *Client) validateSettings() error {
+	var missing []string
+	if c.Host == "" {
+		missing = append(missing, "host (SUPERSET_HOST)")
+	}
+	if c.Username == "" {
+		missing = append(missing, "username (SUPERSET_USERNAME)")
+	}
+	if c.Password == "" {
+		missing = append(missing, "password (SUPERSET_PASSWORD)")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("superset provider is not configured, missing: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// login sends an authentication request to the Superset API and stores the access token.
+// The caller must hold c.mu.
+func (c *Client) login() error {
+	if err := c.validateSettings(); err != nil {
+		return err
+	}
+
 	url := fmt.Sprintf("%s/api/v1/security/login", c.Host)
 	payload := map[string]string{
 		"username": c.Username,
@@ -64,8 +120,7 @@ func (c *Client) authenticate() error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -91,57 +146,40 @@ func (c *Client) authenticate() error {
 		return fmt.Errorf("failed to retrieve access token from response")
 	}
 
-	c.Token = token
-	c.Cookies = resp.Cookies()
+	c.token = token
 	return nil
 }
 
-// DoRequest sends an HTTP request to the specified endpoint using the specified method.
-// It takes the HTTP method, endpoint URL, and payload as input parameters.
-// If a payload is provided, it will be serialized to JSON before sending the request.
-// The function returns the HTTP response and an error, if any.
-func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.Response, error) {
-	url := fmt.Sprintf("%s%s", c.Host, endpoint)
-	var jsonPayload []byte
-	var err error
-
-	if payload != nil {
-		jsonPayload, err = json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
+// send performs an authenticated request to the given endpoint.
+// If Superset rejects the access token (401, e.g. it has expired), the client logs in again
+// and retries the request once. CSRF tokens and their cookies are tied to the session cookie,
+// not to the access token, so they stay valid for the retry.
+func (c *Client) send(method, endpoint string, body []byte, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
+	token, err := c.accessToken()
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 
-	client := &http.Client{}
-	return client.Do(req)
+	resp, err := c.sendWithToken(token, method, endpoint, body, headers, cookies)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	resp.Body.Close()
+
+	token, err = c.refreshAccessToken(token)
+	if err != nil {
+		return nil, err
+	}
+	return c.sendWithToken(token, method, endpoint, body, headers, cookies)
 }
 
-// DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies.
-func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload interface{}, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
-	url := fmt.Sprintf("%s%s", c.Host, endpoint)
-	var jsonPayload []byte
-	var err error
-
-	if payload != nil {
-		jsonPayload, err = json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
+func (c *Client) sendWithToken(token, method, endpoint string, body []byte, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
+	req, err := http.NewRequest(method, fmt.Sprintf("%s%s", c.Host, endpoint), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
@@ -149,8 +187,36 @@ func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload
 		req.AddCookie(cookie)
 	}
 
-	client := &http.Client{}
-	return client.Do(req)
+	return http.DefaultClient.Do(req)
+}
+
+// marshalPayload serializes a request payload to JSON; a nil payload produces an empty body.
+func marshalPayload(payload interface{}) ([]byte, error) {
+	if payload == nil {
+		return nil, nil
+	}
+	return json.Marshal(payload)
+}
+
+// DoRequest sends an HTTP request to the specified endpoint using the specified method.
+// It takes the HTTP method, endpoint URL, and payload as input parameters.
+// If a payload is provided, it will be serialized to JSON before sending the request.
+// The function returns the HTTP response and an error, if any.
+func (c *Client) DoRequest(method, endpoint string, payload interface{}) (*http.Response, error) {
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	return c.send(method, endpoint, body, nil, nil)
+}
+
+// DoRequestWithHeadersAndCookies performs an HTTP request with additional headers and cookies.
+func (c *Client) DoRequestWithHeadersAndCookies(method, endpoint string, payload interface{}, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	return c.send(method, endpoint, body, headers, cookies)
 }
 
 // GetCSRFToken retrieves the CSRF token.
@@ -262,15 +328,7 @@ func (c *Client) GetRolePermissions(roleID int64) ([]Permission, error) {
 // - A slice of int64 IDs that match the provided permissions.
 // - An error if the request fails or the decoding of the response fails.
 func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]int64, error) {
-	url := fmt.Sprintf("%s/api/v1/security/permissions-resources/?q=(page_size:5000)", c.Host)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.DoRequest("GET", "/api/v1/security/permissions-resources/?q=(page_size:5000)", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -505,21 +563,9 @@ func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName strin
 // The function sends a POST request to the Superset API to update the role permissions.
 // It returns an error if the request fails or if the response status code is not 200 OK.
 func (c *Client) UpdateRolePermissions(roleID int64, permissionIDs []int64) error {
-	url := fmt.Sprintf("%s/api/v1/security/roles/%d/permissions", c.Host, roleID)
+	endpoint := fmt.Sprintf("/api/v1/security/roles/%d/permissions", roleID)
 	data := map[string][]int64{"permission_view_menu_ids": permissionIDs}
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.DoRequest("POST", endpoint, data)
 	if err != nil {
 		return err
 	}

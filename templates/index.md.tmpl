@@ -1,0 +1,40 @@
+---
+page_title: "{{.ProviderShortName}} Provider"
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{ .ProviderShortName }} Provider
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/provider/provider.tf" }}
+
+The settings can also be provided with the `SUPERSET_HOST`, `SUPERSET_USERNAME` and `SUPERSET_PASSWORD` environment variables.
+Values set in the configuration take precedence.
+
+## Authentication
+
+The provider authenticates with the Superset login API (`/api/v1/security/login`, `db` provider) and uses the returned access token for all requests.
+
+* **When the provider logs in.** With `validate_credentials = true` (the default) the provider logs in when it is configured,
+  so missing or invalid credentials fail `terraform plan` right away. With `validate_credentials = false` it logs in on the
+  first request made by a resource or data source.
+* **Concurrency.** One access token is shared by all operations of a provider instance. When Terraform runs operations in
+  parallel, only one of them logs in and the others wait for the token.
+* **Expired tokens.** If Superset rejects the access token (HTTP 401, e.g. it has expired during a long apply),
+  the provider logs in again and retries the request once. A second 401 is returned as an error.
+
+## Declaring the provider where Superset is not available
+
+Terraform configures every provider declared in a configuration, even if it manages no resources.
+To declare the provider in a module that is also used where Superset is not deployed, disable the credentials validation:
+
+{{ tffile "examples/provider/provider_without_superset.tf" }}
+
+In this mode `host`, `username` and `password` may be empty and the provider sends no request.
+Any resource or data source that is used anyway fails with an error that lists the missing settings.
+
+{{ .SchemaMarkdown | trimspace }}
