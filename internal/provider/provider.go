@@ -36,9 +36,10 @@ type supersetProvider struct {
 
 // supersetProviderModel maps provider schema data to a Go type.
 type supersetProviderModel struct {
-	Host     types.String `tfsdk:"host"`
-	Username types.String `tfsdk:"username"`
-	Password types.String `tfsdk:"password"`
+	Host                types.String `tfsdk:"host"`
+	Username            types.String `tfsdk:"username"`
+	Password            types.String `tfsdk:"password"`
+	ValidateCredentials types.Bool   `tfsdk:"validate_credentials"`
 }
 
 // Metadata returns the provider type name.
@@ -50,7 +51,8 @@ func (p *supersetProvider) Metadata(_ context.Context, _ provider.MetadataReques
 // Schema defines the provider-level schema for configuration data.
 func (p *supersetProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Superset provider for managing Superset resources.",
+		Description: "Superset provider for managing Superset resources. " +
+			"The provider logs in to Superset when it is configured; set `validate_credentials = false` to defer it until the first API call.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
 				Description: "The URL of the Superset instance. This should include the protocol (http or https) and the hostname or IP address. Example: 'https://superset.example.com'.",
@@ -64,6 +66,13 @@ func (p *supersetProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 				Description: "The password to authenticate with Superset. This value is sensitive and will not be displayed in logs or state files.",
 				Optional:    true,
 				Sensitive:   true,
+			},
+			"validate_credentials": schema.BoolAttribute{
+				Description: "Whether to validate the connection settings and log in to Superset when the provider is configured. Defaults to `true`. " +
+					"When `false`, the provider does not send any request until a resource or data source calls the Superset API, " +
+					"and `host`, `username` and `password` may be left empty. " +
+					"This allows declaring the provider in configurations where Superset is not available and no Superset resources are managed.",
+				Optional: true,
 			},
 		},
 	}
@@ -100,6 +109,15 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 		)
 	}
 
+	if config.ValidateCredentials.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("validate_credentials"),
+			"Unknown Superset Credentials Validation Setting",
+			"The provider cannot create the Superset API client as there is an unknown configuration value for validate_credentials. "+
+				"Either target apply the source of the value first or set the value statically in the configuration.",
+		)
+	}
+
 	if config.Password.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("password"),
@@ -130,8 +148,11 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 		password = config.Password.ValueString()
 	}
 
+	// Credentials are validated by default; with validate_credentials = false they are checked on first API use.
+	validateCredentials := config.ValidateCredentials.IsNull() || config.ValidateCredentials.ValueBool()
+
 	// If any of the expected configurations are missing, return errors with provider-specific guidance.
-	if host == "" {
+	if validateCredentials && host == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("host"),
 			"Missing Superset API Host",
@@ -141,7 +162,7 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 		)
 	}
 
-	if username == "" {
+	if validateCredentials && username == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("username"),
 			"Missing Superset API Username",
@@ -151,7 +172,7 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 		)
 	}
 
-	if password == "" {
+	if validateCredentials && password == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("password"),
 			"Missing Superset API Password",
@@ -174,16 +195,21 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 
 	tflog.Debug(ctx, "Creating Superset client")
 
-	// Create a new Superset client using the configuration values
-	client, err := client.NewClient(host, username, password)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Create Superset API Client",
-			"An unexpected error occurred when creating the Superset API client. "+
-				"If the error is not clear, please contact the provider developers.\n\n"+
-				"Superset Client Error: "+err.Error(),
-		)
-		return
+	// Create a new Superset client using the configuration values.
+	// The client authenticates lazily, so log in here only when the credentials must be validated.
+	client := client.NewClient(host, username, password)
+	if validateCredentials {
+		if err := client.Authenticate(); err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Create Superset API Client",
+				"An unexpected error occurred when creating the Superset API client. "+
+					"If the error is not clear, please contact the provider developers.\n\n"+
+					"Superset Client Error: "+err.Error(),
+			)
+			return
+		}
+	} else {
+		tflog.Info(ctx, "Skipping Superset credentials validation, the client will authenticate on first API call")
 	}
 
 	// Make the Superset client available during DataSource and Resource type Configure methods.
