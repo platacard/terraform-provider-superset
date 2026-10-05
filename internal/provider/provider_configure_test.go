@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -21,7 +20,7 @@ func boolPtr(v bool) *bool    { return &v }
 // configureProvider runs Configure with the given attribute values (nil means the attribute is not set).
 func configureProvider(t *testing.T, cfg testProviderConfig) *provider.ConfigureResponse {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Make sure environment variables do not leak into the test
 	t.Setenv("SUPERSET_HOST", "")
