@@ -227,6 +227,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatabasesDataSource,       // New databases data source
 		NewDatasetsDataSource,        // New datasets data source
 		NewUsersDataSource,           // New users data source
+		NewGroupsDataSource,          // New groups data source
 	}
 }
 
@@ -239,5 +240,6 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewMetaDatabaseResource,    // Meta database resource
 		NewDatasetResource,         // New dataset resource
 		NewUserResource,            // New user resource
+		NewGroupResource,           // New group resource
 	}
 }
