@@ -1,4 +1,5 @@
-# A table of a database. Superset detects the columns and creates the count metric itself.
+# A table of a database. Superset detects the columns and creates the count metric itself
+# unless columns and metrics take them over.
 resource "superset_dataset" "sales" {
   table_name    = "sales"
   database_name = superset_database.warehouse.connection_name
@@ -10,6 +11,15 @@ resource "superset_dataset" "sales" {
   extra = jsonencode({
     certification = { certified_by = "Data team", details = "Reviewed monthly" }
   })
+
+  # With columns set, the dataset has exactly these columns. Only the attributes that are set
+  # are written: the detected type of a column of the source is kept.
+  columns = [
+    { column_name = "id", groupby = false },
+    { column_name = "amount", verbose_name = "Amount" },
+    { column_name = "sold_at", is_dttm = true },
+    { column_name = "amount_cents", expression = "amount * 100", type = "NUMERIC" },
+  ]
 
   # With metrics set, the dataset has exactly these metrics; declare count to keep it.
   metrics = [

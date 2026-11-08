@@ -1,6 +1,10 @@
 ## 0.7.0 (Unreleased)
 
+FEATURES:
+* **New Resource**: `superset_dataset_refresh` - Sync the columns of a dataset from its source, as the dataset editor does, when the resource is created and whenever its `triggers` change.
+
 IMPROVEMENTS:
+* resource/superset_dataset: New `columns` attribute managing the columns of the dataset (name, type, expression of a calculated column, label, description, datetime flag and format, `groupby`, `filterable`); when unset, the columns are left to Superset, and within a column only the attributes that are set are written, so the detected type is kept.
 * resource/superset_dataset: New `metrics` attribute managing the metrics of the dataset (name, expression, label, description, D3 format, warning, type); when unset, the metrics are left to Superset.
 * resource/superset_dataset: New attributes `description`, `owners`, `cache_timeout`, `main_dttm_col`, `template_params`, `extra`, `fetch_values_predicate`, `filter_select_enabled`, `normalize_columns`, `always_filter_main_dttm` and `default_endpoint`. A change of `database_name` now replaces the dataset instead of being ignored, and a dataset deleted outside Terraform is recreated instead of failing the plan.
 * resource/superset_dataset: New computed `perm` and `schema_perm` attributes with the view menus of the dataset and schema permissions, for `superset_role_permissions`.

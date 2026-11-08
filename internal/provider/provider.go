@@ -288,6 +288,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewDatabaseResource,           // New resource
 		NewMetaDatabaseResource,       // Meta database resource
 		NewDatasetResource,            // New dataset resource
+		NewDatasetRefreshResource,     // Dataset column sync
 		NewUserResource,               // New user resource
 		NewCSSTemplateResource,        // CSS template resource
 		NewRowLevelSecurityResource,   // Row level security rule
