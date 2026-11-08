@@ -298,6 +298,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewRowLevelSecurityResource,   // Row level security rule
 		NewSavedQueryResource,         // Saved query
 		NewAnnotationLayerResource,    // Annotation layer
+		NewAnnotationResource,         // Annotation of a layer
 		NewReportResource,             // Report or alert
 		NewChartResource,              // Chart
 		NewDashboardResource,          // Dashboard

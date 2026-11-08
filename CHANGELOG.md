@@ -2,6 +2,7 @@
 
 FEATURES:
 * **New Resource**: `superset_report` - Manage the alerts and reports of the Alerts & Reports page: a chart or a dashboard sent to email or Slack recipients on a schedule, or when a SQL query meets a condition.
+* **New Resource**: `superset_annotation` - Manage the annotations of an annotation layer: events or periods that charts show on their time axis.
 * **New Data Source**: `superset_database`, `superset_dataset`, `superset_chart`, `superset_dashboard` - Look one object up by its name (the slug or title for a dashboard, the table name, schema and database for a dataset), to reference objects that Terraform does not manage.
 * **New Resource**: `superset_dataset_refresh` - Sync the columns of a dataset from its source, as the dataset editor does, when the resource is created and whenever its `triggers` change.
 
