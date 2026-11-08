@@ -152,3 +152,62 @@ func TestMissingSettingsAreReportedOnFirstUse(t *testing.T) {
 		t.Fatalf("expected no requests, got %d", n)
 	}
 }
+
+// registerRoleCreation serves the endpoints CreateRole uses; the creation succeeds only with the given CSRF token
+// (an empty token means the request must carry no token at all).
+func registerRoleCreation(wantCSRF string) {
+	httpmock.RegisterResponder("GET", testHost+"/api/v1/security/roles?q=(page_size:5000)",
+		httpmock.NewStringResponder(200, `{"result": []}`))
+	httpmock.RegisterResponder("POST", testHost+"/api/v1/security/roles/",
+		func(req *http.Request) (*http.Response, error) {
+			if req.Header.Get("X-CSRFToken") != wantCSRF {
+				return httpmock.NewStringResponse(400, `{"message": "The CSRF token is missing."}`), nil
+			}
+			return httpmock.NewStringResponse(201, `{"id": 7}`), nil
+		})
+}
+
+func csrfTokenCalls() int {
+	return httpmock.GetCallCountInfo()["GET "+testHost+"/api/v1/security/csrf_token/"]
+}
+
+func TestWriteRequestsCarryCSRFTokenByDefault(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	registerLogin("token-1")
+	httpmock.RegisterResponder("GET", testHost+"/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "csrf-1"}`))
+	registerRoleCreation("csrf-1")
+
+	c := NewClient(testHost, "user", "pass")
+	id, err := c.CreateRole("Analysts")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 7 {
+		t.Fatalf("expected role ID 7, got %d", id)
+	}
+	if n := csrfTokenCalls(); n != 1 {
+		t.Fatalf("expected a single CSRF token request, got %d", n)
+	}
+}
+
+func TestWriteRequestsSkipCSRFTokenWhenDisabled(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	registerLogin("token-1")
+	registerRoleCreation("")
+
+	c := NewClient(testHost, "user", "pass")
+	c.CSRFEnabled = false
+	id, err := c.CreateRole("Analysts")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 7 {
+		t.Fatalf("expected role ID 7, got %d", id)
+	}
+	if n := csrfTokenCalls(); n != 0 {
+		t.Fatalf("expected no CSRF token request, got %d", n)
+	}
+}

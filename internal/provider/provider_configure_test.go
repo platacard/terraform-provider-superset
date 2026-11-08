@@ -7,11 +7,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/jarcoal/httpmock"
+	"terraform-provider-superset/internal/client"
 )
 
 type testProviderConfig struct {
 	host, username, password *string
 	validateCredentials      *bool
+	csrfEnabled              *bool
 }
 
 func strPtr(v string) *string { return &v }
@@ -41,11 +43,16 @@ func configureProvider(t *testing.T, cfg testProviderConfig) *provider.Configure
 	if cfg.validateCredentials != nil {
 		validate = tftypes.NewValue(tftypes.Bool, *cfg.validateCredentials)
 	}
+	csrf := tftypes.NewValue(tftypes.Bool, nil)
+	if cfg.csrfEnabled != nil {
+		csrf = tftypes.NewValue(tftypes.Bool, *cfg.csrfEnabled)
+	}
 	raw := tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), map[string]tftypes.Value{
 		"host":                 str(cfg.host),
 		"username":             str(cfg.username),
 		"password":             str(cfg.password),
 		"validate_credentials": validate,
+		"csrf_enabled":         csrf,
 	})
 
 	resp := &provider.ConfigureResponse{}
@@ -107,6 +114,39 @@ func TestConfigureWithoutValidationSendsNoRequests(t *testing.T) {
 			}
 			if n := httpmock.GetTotalCallCount(); n != 0 {
 				t.Fatalf("expected no requests on configure, got %d", n)
+			}
+		})
+	}
+}
+
+func TestConfigureCSRFEnabled(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	registerTestLogin()
+
+	for name, tc := range map[string]struct {
+		csrfEnabled *bool
+		want        bool
+	}{
+		"default":  {nil, true},
+		"enabled":  {boolPtr(true), true},
+		"disabled": {boolPtr(false), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := configureProvider(t, testProviderConfig{
+				host: strPtr("http://superset-host"), username: strPtr("user"), password: strPtr("pass"),
+				csrfEnabled: tc.csrfEnabled,
+			})
+
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("expected no errors, got: %v", resp.Diagnostics)
+			}
+			c, ok := resp.ResourceData.(*client.Client)
+			if !ok {
+				t.Fatalf("expected *client.Client, got %T", resp.ResourceData)
+			}
+			if c.CSRFEnabled != tc.want {
+				t.Fatalf("expected CSRFEnabled=%v, got %v", tc.want, c.CSRFEnabled)
 			}
 		})
 	}
