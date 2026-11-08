@@ -24,6 +24,8 @@ import (
 type fakeDataset struct {
 	mu      sync.Mutex
 	dataset map[string]any
+	metrics []map[string]any
+	nextID  float64
 	deleted bool
 	updates int
 	// legacy makes the create endpoint reject template parameters, as Superset 3.1 does.
@@ -59,6 +61,9 @@ func (f *fakeDataset) serve() {
 				return httpmock.NewStringResponse(400, `{"message": {"template_params": ["Unknown field."]}}`), nil
 			}
 			f.dataset, f.deleted = payload, false
+			// Superset creates the count metric with every dataset.
+			f.metrics = []map[string]any{{"id": float64(1), "metric_name": "count", "expression": "COUNT(*)", "verbose_name": "COUNT(*)", "metric_type": "count"}}
+			f.nextID = 2
 			return httpmock.NewStringResponse(201, `{"id": 123}`), nil
 		})
 	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/dataset/123",
@@ -67,7 +72,40 @@ func (f *fakeDataset) serve() {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			for key, value := range payload {
+				if key == "metrics" {
+					continue
+				}
 				f.dataset[key] = value
+			}
+			if entries, ok := payload["metrics"].([]any); ok {
+				// Like Superset: an entry with an id updates the metric and keeps the fields it
+				// does not carry, one without an id creates a metric, and the rest are deleted.
+				existing := map[float64]map[string]any{}
+				for _, metric := range f.metrics {
+					id, _ := metric["id"].(float64)
+					existing[id] = metric
+				}
+				var kept []map[string]any
+				for _, entry := range entries {
+					fields, _ := entry.(map[string]any)
+					metric := map[string]any{}
+					if id, ok := fields["id"].(float64); ok {
+						if _, known := existing[id]; !known {
+							return httpmock.NewStringResponse(422, `{"message": {"metrics": ["One or more metrics do not exist"]}}`), nil
+						}
+						for k, v := range existing[id] {
+							metric[k] = v
+						}
+					} else {
+						metric["id"] = f.nextID
+						f.nextID++
+					}
+					for k, v := range fields {
+						metric[k] = v
+					}
+					kept = append(kept, metric)
+				}
+				f.metrics = kept
 			}
 			f.updates++
 			return httpmock.NewStringResponse(200, `{"id": 123}`), nil
@@ -104,6 +142,7 @@ func (f *fakeDataset) serve() {
 				"normalize_columns":       f.dataset["normalize_columns"],
 				"always_filter_main_dttm": f.dataset["always_filter_main_dttm"],
 				"default_endpoint":        f.dataset["default_endpoint"],
+				"metrics":                 f.metrics,
 			}
 			if v, ok := f.dataset["main_dttm_col"]; ok && v != nil {
 				result["main_dttm_col"] = v
@@ -120,6 +159,18 @@ func (f *fakeDataset) serve() {
 			f.deleted = true
 			return httpmock.NewStringResponse(200, `{"message": "OK"}`), nil
 		})
+}
+
+// metric returns the stored metric with the given name, or nil.
+func (f *fakeDataset) metric(name string) map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, metric := range f.metrics {
+		if metric["metric_name"] == name {
+			return metric
+		}
+	}
+	return nil
 }
 
 // sent returns the value of a key of the dataset as the last request left it.
@@ -383,6 +434,100 @@ resource "superset_dataset" "test" {
 }
 `,
 				ExpectError: regexp.MustCompile(`database "Missing Database": not found`),
+			},
+		},
+	})
+}
+
+func TestAccDatasetResourceMetrics(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	fake := &fakeDataset{}
+	fake.serve()
+
+	withMetrics := providerConfig + `
+resource "superset_dataset" "test" {
+  table_name    = "sales"
+  database_name = "PostgreSQL Database"
+  schema        = "public"
+  metrics = [
+    { metric_name = "count", expression = "COUNT(*)" },
+    { metric_name = "revenue", expression = "SUM(amount)", verbose_name = "Revenue", d3format = ",.2f", description = "Sum of amount", warning_text = "beta", metric_type = "sum" },
+  ]
+}
+`
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Without metrics in the configuration the dataset keeps the count metric of Superset.
+				Config: physicalDataset,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "metrics.#", "1"),
+					resource.TestCheckTypeSetElemNestedAttrs("superset_dataset.test", "metrics.*", map[string]string{"metric_name": "count", "expression": "COUNT(*)", "verbose_name": "COUNT(*)", "metric_type": "count"}),
+					func(*terraform.State) error {
+						if _, present := fake.dataset["metrics"]; present {
+							return errors.New("metrics must not be sent when they are not configured")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: withMetrics,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "metrics.#", "2"),
+					resource.TestCheckTypeSetElemNestedAttrs("superset_dataset.test", "metrics.*", map[string]string{"metric_name": "revenue", "expression": "SUM(amount)", "verbose_name": "Revenue", "d3format": ",.2f", "description": "Sum of amount", "warning_text": "beta", "metric_type": "sum"}),
+					func(*terraform.State) error {
+						count := fake.metric("count")
+						if count == nil || count["id"] != float64(1) {
+							return errors.New("the existing count metric must be updated in place, not recreated")
+						}
+						if count["verbose_name"] != nil || count["metric_type"] != nil {
+							return errors.New("fields missing from the configuration must be cleared with null")
+						}
+						if revenue := fake.metric("revenue"); revenue == nil || revenue["id"] != float64(2) {
+							return errors.New("the new metric must be created")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				ResourceName:      "superset_dataset.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				// Removing a metric from the configuration deletes it.
+				Config: providerConfig + `
+resource "superset_dataset" "test" {
+  table_name    = "sales"
+  database_name = "PostgreSQL Database"
+  schema        = "public"
+  metrics = [
+    { metric_name = "revenue", expression = "SUM(amount) / 100" },
+  ]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "metrics.#", "1"),
+					func(*terraform.State) error {
+						if fake.metric("count") != nil {
+							return errors.New("a metric removed from the configuration must be deleted")
+						}
+						if revenue := fake.metric("revenue"); revenue["id"] != float64(2) || revenue["expression"] != "SUM(amount) / 100" {
+							return fmt.Errorf("the changed metric must keep its id, got %v", revenue)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// Dropping the metrics attribute leaves the metrics alone.
+				Config:   physicalDataset,
+				PlanOnly: true,
 			},
 		},
 	})

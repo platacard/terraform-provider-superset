@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -15,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -56,8 +58,30 @@ type datasetResourceModel struct {
 	NormalizeColumns     types.Bool   `tfsdk:"normalize_columns"`
 	AlwaysFilterMainDttm types.Bool   `tfsdk:"always_filter_main_dttm"`
 	DefaultEndpoint      types.String `tfsdk:"default_endpoint"`
+	Metrics              types.Set    `tfsdk:"metrics"`
 	Perm                 types.String `tfsdk:"perm"`
 	SchemaPerm           types.String `tfsdk:"schema_perm"`
+}
+
+// datasetMetricModel maps one element of the metrics attribute.
+type datasetMetricModel struct {
+	Name        types.String `tfsdk:"metric_name"`
+	Expression  types.String `tfsdk:"expression"`
+	VerboseName types.String `tfsdk:"verbose_name"`
+	Description types.String `tfsdk:"description"`
+	D3Format    types.String `tfsdk:"d3format"`
+	WarningText types.String `tfsdk:"warning_text"`
+	MetricType  types.String `tfsdk:"metric_type"`
+}
+
+var datasetMetricAttributeTypes = map[string]attr.Type{
+	"metric_name":  types.StringType,
+	"expression":   types.StringType,
+	"verbose_name": types.StringType,
+	"description":  types.StringType,
+	"d3format":     types.StringType,
+	"warning_text": types.StringType,
+	"metric_type":  types.StringType,
 }
 
 // Metadata returns the resource type name.
@@ -157,6 +181,46 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "URL Superset redirects to when the dataset is opened.",
 				Optional:    true,
 			},
+			"metrics": schema.SetNestedAttribute{
+				Description: "Metrics of the dataset. When unset, the metrics are left to Superset, which creates `count` with every dataset. When set, the dataset has exactly these metrics: declare `count` too if it should stay, and metrics not listed here are deleted.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"metric_name": schema.StringAttribute{
+							Description: "Name of the metric, unique within the dataset.",
+							Required:    true,
+						},
+						"expression": schema.StringAttribute{
+							Description: "SQL aggregate expression of the metric, for example `SUM(amount)`.",
+							Required:    true,
+						},
+						"verbose_name": schema.StringAttribute{
+							Description: "Label shown instead of the name.",
+							Optional:    true,
+						},
+						"description": schema.StringAttribute{
+							Description: "Free-text description of the metric.",
+							Optional:    true,
+						},
+						"d3format": schema.StringAttribute{
+							Description: "D3 format of the values, for example `,.2f`.",
+							Optional:    true,
+						},
+						"warning_text": schema.StringAttribute{
+							Description: "Warning shown next to the metric.",
+							Optional:    true,
+						},
+						"metric_type": schema.StringAttribute{
+							Description: "Type of the aggregate, for example `sum` or `count`; informational.",
+							Optional:    true,
+						},
+					},
+				},
+			},
 			"perm": schema.StringAttribute{
 				Description: "View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.",
 				Computed:    true,
@@ -196,7 +260,7 @@ func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	dataset, diags := r.datasetFromModel(ctx, plan)
+	dataset, diags := r.datasetFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -250,7 +314,7 @@ func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	dataset, diags := r.datasetFromModel(ctx, plan)
+	dataset, diags := r.datasetFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -324,8 +388,9 @@ func (r *datasetResource) readInto(ctx context.Context, id int64, state stateSet
 	diags.Append(state.Set(ctx, &model)...)
 }
 
-// datasetFromModel builds the dataset of the plan, looking the database up by its name.
-func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel) (client.Dataset, diag.Diagnostics) {
+// datasetFromModel builds the dataset of the plan, looking the database up by its name. The
+// metrics are only part of it when the configuration sets them.
+func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel, config tfsdk.Config) (client.Dataset, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	databaseID, err := r.client.GetDatabaseIDByName(model.DatabaseName.ValueString())
 	if err != nil {
@@ -352,12 +417,45 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 	if !model.Owners.IsNull() && !model.Owners.IsUnknown() {
 		diags.Append(model.Owners.ElementsAs(ctx, &dataset.Owners, false)...)
 	}
+
+	var configured types.Set
+	diags.Append(config.GetAttribute(ctx, path.Root("metrics"), &configured)...)
+	if !configured.IsNull() && !model.Metrics.IsUnknown() {
+		var metrics []datasetMetricModel
+		diags.Append(model.Metrics.ElementsAs(ctx, &metrics, false)...)
+		dataset.Metrics = make([]client.DatasetMetric, 0, len(metrics))
+		for _, metric := range metrics {
+			dataset.Metrics = append(dataset.Metrics, client.DatasetMetric{
+				Name:        metric.Name.ValueString(),
+				Expression:  metric.Expression.ValueString(),
+				VerboseName: metric.VerboseName.ValueString(),
+				Description: metric.Description.ValueString(),
+				D3Format:    metric.D3Format.ValueString(),
+				WarningText: metric.WarningText.ValueString(),
+				MetricType:  metric.MetricType.ValueString(),
+			})
+		}
+	}
 	return dataset, diags
 }
 
 // datasetModel maps a dataset to the state, with the view menus of its permissions.
 func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
+	metrics := make([]datasetMetricModel, 0, len(dataset.Metrics))
+	for _, metric := range dataset.Metrics {
+		metrics = append(metrics, datasetMetricModel{
+			Name:        types.StringValue(metric.Name),
+			Expression:  types.StringValue(metric.Expression),
+			VerboseName: optionalString(metric.VerboseName),
+			Description: optionalString(metric.Description),
+			D3Format:    optionalString(metric.D3Format),
+			WarningText: optionalString(metric.WarningText),
+			MetricType:  optionalString(metric.MetricType),
+		})
+	}
+	metricsValue, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetMetricAttributeTypes}, metrics)
+	diags.Append(d...)
 	model := datasetResourceModel{
 		ID:                   types.Int64Value(dataset.ID),
 		TableName:            types.StringValue(dataset.TableName),
@@ -375,6 +473,7 @@ func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResource
 		NormalizeColumns:     types.BoolValue(dataset.NormalizeColumns),
 		AlwaysFilterMainDttm: types.BoolValue(dataset.AlwaysFilterMainDttm),
 		DefaultEndpoint:      optionalString(dataset.DefaultEndpoint),
+		Metrics:              metricsValue,
 	}
 	setDatasetPermissions(&model)
 	return model, diags

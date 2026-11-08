@@ -28,6 +28,35 @@ type Dataset struct {
 	NormalizeColumns     bool
 	AlwaysFilterMainDttm bool
 	DefaultEndpoint      string
+	// Metrics are the metrics of the dataset. A nil slice leaves the metrics as they are in
+	// Superset; a non-nil slice, even an empty one, replaces them.
+	Metrics []DatasetMetric
+}
+
+// DatasetMetric is a metric of a dataset, an aggregate expression over its columns.
+type DatasetMetric struct {
+	ID          int64
+	Name        string
+	Expression  string
+	VerboseName string
+	Description string
+	D3Format    string
+	WarningText string
+	MetricType  string
+}
+
+// datasetMetricPayload is a metric in an update request. An entry with an id updates the
+// metric, one without creates it, and Superset deletes the metrics that are not listed.
+// Optional fields are sent as null when empty, so an update can clear them.
+type datasetMetricPayload struct {
+	ID          *int64  `json:"id,omitempty"`
+	Name        string  `json:"metric_name"`
+	Expression  string  `json:"expression"`
+	VerboseName *string `json:"verbose_name"`
+	Description *string `json:"description"`
+	D3Format    *string `json:"d3format"`
+	WarningText *string `json:"warning_text"`
+	MetricType  *string `json:"metric_type"`
 }
 
 // datasetCreatePayload is the body of the create request, which only accepts the fields that
@@ -50,20 +79,21 @@ type datasetCreatePayload struct {
 // when set, because Superset fills them in on its own. Columns and metrics are left out, which
 // keeps them as they are.
 type datasetUpdatePayload struct {
-	TableName            string  `json:"table_name"`
-	Schema               *string `json:"schema"`
-	SQL                  *string `json:"sql"`
-	Description          *string `json:"description"`
-	Owners               []int64 `json:"owners,omitempty"`
-	CacheTimeout         *int64  `json:"cache_timeout"`
-	MainDttmCol          *string `json:"main_dttm_col,omitempty"`
-	TemplateParams       *string `json:"template_params"`
-	Extra                *string `json:"extra"`
-	FetchValuesPredicate *string `json:"fetch_values_predicate"`
-	FilterSelectEnabled  bool    `json:"filter_select_enabled"`
-	NormalizeColumns     bool    `json:"normalize_columns"`
-	AlwaysFilterMainDttm bool    `json:"always_filter_main_dttm"`
-	DefaultEndpoint      *string `json:"default_endpoint"`
+	TableName            string                  `json:"table_name"`
+	Schema               *string                 `json:"schema"`
+	SQL                  *string                 `json:"sql"`
+	Description          *string                 `json:"description"`
+	Owners               []int64                 `json:"owners,omitempty"`
+	CacheTimeout         *int64                  `json:"cache_timeout"`
+	MainDttmCol          *string                 `json:"main_dttm_col,omitempty"`
+	TemplateParams       *string                 `json:"template_params"`
+	Extra                *string                 `json:"extra"`
+	FetchValuesPredicate *string                 `json:"fetch_values_predicate"`
+	FilterSelectEnabled  bool                    `json:"filter_select_enabled"`
+	NormalizeColumns     bool                    `json:"normalize_columns"`
+	AlwaysFilterMainDttm bool                    `json:"always_filter_main_dttm"`
+	DefaultEndpoint      *string                 `json:"default_endpoint"`
+	Metrics              *[]datasetMetricPayload `json:"metrics,omitempty"`
 }
 
 func newDatasetUpdatePayload(dataset Dataset) datasetUpdatePayload {
@@ -83,6 +113,32 @@ func newDatasetUpdatePayload(dataset Dataset) datasetUpdatePayload {
 		AlwaysFilterMainDttm: dataset.AlwaysFilterMainDttm,
 		DefaultEndpoint:      nullIfEmpty(dataset.DefaultEndpoint),
 	}
+}
+
+// metricPayloads builds the metrics of an update, giving the metrics that exist in Superset
+// their id, so they are updated rather than recreated.
+func metricPayloads(metrics []DatasetMetric, current []DatasetMetric) []datasetMetricPayload {
+	ids := make(map[string]int64, len(current))
+	for _, metric := range current {
+		ids[metric.Name] = metric.ID
+	}
+	payloads := make([]datasetMetricPayload, 0, len(metrics))
+	for _, metric := range metrics {
+		payload := datasetMetricPayload{
+			Name:        metric.Name,
+			Expression:  metric.Expression,
+			VerboseName: nullIfEmpty(metric.VerboseName),
+			Description: nullIfEmpty(metric.Description),
+			D3Format:    nullIfEmpty(metric.D3Format),
+			WarningText: nullIfEmpty(metric.WarningText),
+			MetricType:  nullIfEmpty(metric.MetricType),
+		}
+		if id, ok := ids[metric.Name]; ok {
+			payload.ID = &id
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads
 }
 
 // datasetResult is the dataset as the API returns it.
@@ -105,6 +161,16 @@ type datasetResult struct {
 	NormalizeColumns     bool        `json:"normalize_columns"`
 	AlwaysFilterMainDttm bool        `json:"always_filter_main_dttm"`
 	DefaultEndpoint      string      `json:"default_endpoint"`
+	Metrics              []struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"metric_name"`
+		Expression  string `json:"expression"`
+		VerboseName string `json:"verbose_name"`
+		Description string `json:"description"`
+		D3Format    string `json:"d3format"`
+		WarningText string `json:"warning_text"`
+		MetricType  string `json:"metric_type"`
+	} `json:"metrics"`
 }
 
 func datasetPath(id int64) string {
@@ -201,6 +267,19 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 		NormalizeColumns:     result.NormalizeColumns,
 		AlwaysFilterMainDttm: result.AlwaysFilterMainDttm,
 		DefaultEndpoint:      result.DefaultEndpoint,
+		Metrics:              make([]DatasetMetric, 0, len(result.Metrics)),
+	}
+	for _, metric := range result.Metrics {
+		dataset.Metrics = append(dataset.Metrics, DatasetMetric{
+			ID:          metric.ID,
+			Name:        metric.Name,
+			Expression:  metric.Expression,
+			VerboseName: metric.VerboseName,
+			Description: metric.Description,
+			D3Format:    metric.D3Format,
+			WarningText: metric.WarningText,
+			MetricType:  metric.MetricType,
+		})
 	}
 	if dataset.DatabaseName == "" && dataset.DatabaseID != 0 {
 		name, err := c.GetDatabaseNameByID(dataset.DatabaseID)
@@ -212,14 +291,26 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 	return dataset, nil
 }
 
-// UpdateDataset replaces the settings of a dataset; its columns and metrics are left as they are.
+// UpdateDataset replaces the settings of a dataset. The metrics are replaced as well when the
+// dataset carries a non-nil list of them: the ones that exist keep their id, new ones are
+// created and the ones that are not listed are deleted. The columns are left as they are.
 func (c *Client) UpdateDataset(id int64, dataset Dataset) error {
+	payload := newDatasetUpdatePayload(dataset)
+	if dataset.Metrics != nil {
+		current, err := c.GetDataset(id)
+		if err != nil {
+			return err
+		}
+		metrics := metricPayloads(dataset.Metrics, current.Metrics)
+		payload.Metrics = &metrics
+	}
+
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
 	}
 
-	resp, err := c.DoRequestWithHeadersAndCookies(http.MethodPut, datasetPath(id), newDatasetUpdatePayload(dataset), headers, cookies)
+	resp, err := c.DoRequestWithHeadersAndCookies(http.MethodPut, datasetPath(id), payload, headers, cookies)
 	if err != nil {
 		return err
 	}
