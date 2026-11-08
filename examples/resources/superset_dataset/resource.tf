@@ -10,6 +10,12 @@ resource "superset_dataset" "sales" {
   extra = jsonencode({
     certification = { certified_by = "Data team", details = "Reviewed monthly" }
   })
+
+  # With metrics set, the dataset has exactly these metrics; declare count to keep it.
+  metrics = [
+    { metric_name = "count", expression = "COUNT(*)", verbose_name = "Sales" },
+    { metric_name = "revenue", expression = "SUM(amount)", verbose_name = "Revenue", d3format = ",.2f" },
+  ]
 }
 
 # A virtual dataset defined by a query with a Jinja parameter.

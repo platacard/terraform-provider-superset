@@ -25,6 +25,12 @@ resource "superset_dataset" "sales" {
   extra = jsonencode({
     certification = { certified_by = "Data team", details = "Reviewed monthly" }
   })
+
+  # With metrics set, the dataset has exactly these metrics; declare count to keep it.
+  metrics = [
+    { metric_name = "count", expression = "COUNT(*)", verbose_name = "Sales" },
+    { metric_name = "revenue", expression = "SUM(amount)", verbose_name = "Revenue", d3format = ",.2f" },
+  ]
 }
 
 # A virtual dataset defined by a query with a Jinja parameter.
@@ -54,6 +60,7 @@ resource "superset_dataset" "signups_per_day" {
 - `fetch_values_predicate` (String) SQL predicate applied when Superset fetches the distinct values of a column for a filter.
 - `filter_select_enabled` (Boolean) Whether filters of the dataset offer the distinct values of a column. Defaults to `true`.
 - `main_dttm_col` (String) Column used as the default time column of the dataset. Superset picks the first datetime column when unset.
+- `metrics` (Attributes Set) Metrics of the dataset. When unset, the metrics are left to Superset, which creates `count` with every dataset. When set, the dataset has exactly these metrics: declare `count` too if it should stay, and metrics not listed here are deleted. (see [below for nested schema](#nestedatt--metrics))
 - `normalize_columns` (Boolean) Whether the names of the columns are normalized to lower case when they are fetched from the source. Defaults to `false`.
 - `owners` (Set of Number) Identifiers of the users who own the dataset. Defaults to the user the provider authenticates as.
 - `schema` (String) Schema of the table.
@@ -65,6 +72,22 @@ resource "superset_dataset" "signups_per_day" {
 - `id` (Number) Numeric identifier of the dataset.
 - `perm` (String) View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.
 - `schema_perm` (String) View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.
+
+<a id="nestedatt--metrics"></a>
+### Nested Schema for `metrics`
+
+Required:
+
+- `expression` (String) SQL aggregate expression of the metric, for example `SUM(amount)`.
+- `metric_name` (String) Name of the metric, unique within the dataset.
+
+Optional:
+
+- `d3format` (String) D3 format of the values, for example `,.2f`.
+- `description` (String) Free-text description of the metric.
+- `metric_type` (String) Type of the aggregate, for example `sum` or `count`; informational.
+- `verbose_name` (String) Label shown instead of the name.
+- `warning_text` (String) Warning shown next to the metric.
 
 ## Import
 

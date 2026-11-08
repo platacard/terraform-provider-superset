@@ -1,6 +1,7 @@
 ## 0.7.0 (Unreleased)
 
 IMPROVEMENTS:
+* resource/superset_dataset: New `metrics` attribute managing the metrics of the dataset (name, expression, label, description, D3 format, warning, type); when unset, the metrics are left to Superset.
 * resource/superset_dataset: New attributes `description`, `owners`, `cache_timeout`, `main_dttm_col`, `template_params`, `extra`, `fetch_values_predicate`, `filter_select_enabled`, `normalize_columns`, `always_filter_main_dttm` and `default_endpoint`. A change of `database_name` now replaces the dataset instead of being ignored, and a dataset deleted outside Terraform is recreated instead of failing the plan.
 * resource/superset_dataset: New computed `perm` and `schema_perm` attributes with the view menus of the dataset and schema permissions, for `superset_role_permissions`.
 * provider: When Superset does not expose the users, roles or permissions endpoints, the error explains that `FAB_ADD_SECURITY_API = True` is required instead of showing a raw 404, and such a 404 is no longer mistaken for a deleted object.
