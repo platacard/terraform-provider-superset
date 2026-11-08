@@ -12,12 +12,12 @@ description: |-
 
 {{ tffile "examples/provider/provider.tf" }}
 
-The settings can also be provided with the `SUPERSET_HOST`, `SUPERSET_USERNAME` and `SUPERSET_PASSWORD` environment variables.
+The settings can also be provided with the `SUPERSET_HOST`, `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` and `SUPERSET_AUTH_PROVIDER` environment variables.
 Values set in the configuration take precedence.
 
 ## Authentication
 
-The provider authenticates with the Superset login API (`/api/v1/security/login`, `db` provider) and uses the returned access token for all requests.
+The provider authenticates with the Superset login API (`/api/v1/security/login`) and uses the returned access token for all requests.
 
 * **When the provider logs in.** With `validate_credentials = true` (the default) the provider logs in when it is configured,
   so missing or invalid credentials fail `terraform plan` right away. With `validate_credentials = false` it logs in on the
@@ -26,6 +26,17 @@ The provider authenticates with the Superset login API (`/api/v1/security/login`
   parallel, only one of them logs in and the others wait for the token.
 * **Expired tokens.** If Superset rejects the access token (HTTP 401, e.g. it has expired during a long apply),
   the provider logs in again and retries the request once. A second 401 is returned as an error.
+
+## Authentication provider
+
+The login request names an authentication provider. With `auth_provider = "db"` (the default) the credentials are those of
+a user of the Superset database. An instance configured with `AUTH_TYPE = AUTH_LDAP` only accepts LDAP logins and rejects
+the default with `Alternative authentication provider is not allowed`; select the LDAP provider for it:
+
+{{ tffile "examples/provider/provider_ldap.tf" }}
+
+The LDAP user must have a role that allows the operations of the configuration, for example through
+`AUTH_USER_REGISTRATION_ROLE` or the role mapping of the instance.
 
 ## Declaring the provider where Superset is not available
 

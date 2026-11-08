@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"terraform-provider-superset/internal/client"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -41,6 +43,7 @@ type supersetProviderModel struct {
 	Password            types.String `tfsdk:"password"`
 	ValidateCredentials types.Bool   `tfsdk:"validate_credentials"`
 	CSRFEnabled         types.Bool   `tfsdk:"csrf_enabled"`
+	AuthProvider        types.String `tfsdk:"auth_provider"`
 }
 
 // Metadata returns the provider type name.
@@ -80,6 +83,12 @@ func (p *supersetProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 					"which is required by a Superset instance with the default `WTF_CSRF_ENABLED = True`. " +
 					"Set it to `false` for an instance where CSRF protection is disabled to skip the extra request before each write operation.",
 				Optional: true,
+			},
+			"auth_provider": schema.StringAttribute{
+				Description: "Authentication provider named in the login request: `db` (the default) for users of the Superset database, " +
+					"`ldap` for an instance with `AUTH_TYPE = AUTH_LDAP`. Can also be set with the `SUPERSET_AUTH_PROVIDER` environment variable.",
+				Optional:   true,
+				Validators: []validator.String{oneOf{"db", "ldap"}},
 			},
 		},
 	}
@@ -134,6 +143,15 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 		)
 	}
 
+	if config.AuthProvider.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("auth_provider"),
+			"Unknown Superset Authentication Provider",
+			"The provider cannot create the Superset API client as there is an unknown configuration value for auth_provider. "+
+				"Either target apply the source of the value first, set the value statically in the configuration, or use the SUPERSET_AUTH_PROVIDER environment variable.",
+		)
+	}
+
 	if config.Password.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("password"),
@@ -151,6 +169,18 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 	host := os.Getenv("SUPERSET_HOST")
 	username := os.Getenv("SUPERSET_USERNAME")
 	password := os.Getenv("SUPERSET_PASSWORD")
+	authProvider := os.Getenv("SUPERSET_AUTH_PROVIDER")
+	if !config.AuthProvider.IsNull() {
+		authProvider = config.AuthProvider.ValueString()
+	}
+	if authProvider != "" && authProvider != "db" && authProvider != "ldap" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("auth_provider"),
+			"Invalid Superset Authentication Provider",
+			fmt.Sprintf("The authentication provider must be db or ldap, got %q.", authProvider),
+		)
+		return
+	}
 
 	if !config.Host.IsNull() {
 		host = config.Host.ValueString()
@@ -215,6 +245,7 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 	// The client authenticates lazily, so log in here only when the credentials must be validated.
 	client := client.NewClient(host, username, password)
 	client.CSRFEnabled = config.CSRFEnabled.IsNull() || config.CSRFEnabled.ValueBool()
+	client.AuthProvider = authProvider
 	if validateCredentials {
 		if err := client.Authenticate(); err != nil {
 			resp.Diagnostics.AddError(
