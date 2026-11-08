@@ -50,6 +50,7 @@ type dashboardResourceModel struct {
 	CertificationDetails types.String `tfsdk:"certification_details"`
 	Owners               types.Set    `tfsdk:"owners"`
 	Roles                types.Set    `tfsdk:"roles"`
+	Tags                 types.Set    `tfsdk:"tags"`
 }
 
 // stateSetter is the part of a state that stores a model.
@@ -132,6 +133,15 @@ func (r *dashboardResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				ElementType: types.Int64Type,
 				Optional:    true,
 			},
+			"tags": schema.SetAttribute{
+				Description: "Names of the tags attached to the dashboard, with the `TAGGING_SYSTEM` feature flag. When unset, the tags are left as they are; when set, the dashboard has exactly these tags. Tags that do not exist yet are created, and stay when the dashboard is destroyed.",
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
 }
@@ -160,6 +170,7 @@ func (r *dashboardResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	resp.Diagnostics.Append(r.applyTags(ctx, id, plan.Tags, types.SetNull(types.StringType))...)
 	r.readInto(ctx, id, plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dashboard After Creation")
 }
 
@@ -210,6 +221,8 @@ func (r *dashboardResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	resp.Diagnostics.Append(r.applyTags(ctx, state.ID.ValueInt64(), plan.Tags, state.Tags)...)
+
 	r.readInto(ctx, state.ID.ValueInt64(), plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dashboard After Update")
 }
 
@@ -256,6 +269,29 @@ func (r *dashboardResource) Configure(_ context.Context, req resource.ConfigureR
 	r.client = client
 }
 
+// applyTags attaches and detaches tags so the dashboard has exactly the planned ones, when
+// the configuration sets them.
+func (r *dashboardResource) applyTags(ctx context.Context, id int64, planned, prior types.Set) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if planned.IsNull() || planned.IsUnknown() || planned.Equal(prior) {
+		return diags
+	}
+	var desired []string
+	diags.Append(planned.ElementsAs(ctx, &desired, false)...)
+	if diags.HasError() {
+		return diags
+	}
+	dashboard, err := r.client.GetDashboard(id)
+	if err != nil {
+		diags.AddError("Unable to Read the Tags of the Superset Dashboard", err.Error())
+		return diags
+	}
+	if err := r.client.SetObjectTags(client.DashboardObject, id, dashboard.Tags, desired); err != nil {
+		diags.AddError("Unable to Tag the Superset Dashboard", err.Error())
+	}
+	return diags
+}
+
 // readInto fetches the dashboard and stores it in the state after a create or an update, so the
 // state carries the values Superset computed, such as the default owners or the completed metadata.
 func (r *dashboardResource) readInto(ctx context.Context, id int64, plan dashboardResourceModel, state stateSetter, diags *diag.Diagnostics, summary string) {
@@ -299,6 +335,8 @@ func dashboardFromModel(ctx context.Context, model dashboardResourceModel) (clie
 // the prior model has none either, so a configuration without roles does not drift.
 func dashboardModel(ctx context.Context, dashboard *client.Dashboard, prior dashboardResourceModel) (dashboardResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dashboard.Owners)
+	tags, d := types.SetValueFrom(ctx, types.StringType, nonNilStrings(dashboard.Tags))
+	diags.Append(d...)
 	roles := types.SetNull(types.Int64Type)
 	if len(dashboard.Roles) > 0 || !prior.Roles.IsNull() {
 		var d diag.Diagnostics
@@ -318,6 +356,7 @@ func dashboardModel(ctx context.Context, dashboard *client.Dashboard, prior dash
 		CertificationDetails: optionalString(dashboard.CertificationDetails),
 		Owners:               owners,
 		Roles:                roles,
+		Tags:                 tags,
 	}
 	return model, diags
 }

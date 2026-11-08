@@ -23,6 +23,9 @@ type Dashboard struct {
 	CertificationDetails string
 	Owners               []int64
 	Roles                []int64
+	// Tags are the names of the tags people attached to the object; the owner, type and
+	// favorite relations Superset keeps as tags are left out.
+	Tags []string
 }
 
 // dashboardPayload is the body of the create and update requests. The create endpoint rejects a
@@ -90,16 +93,17 @@ func dashboardMetadata(current, configured, layout string) (string, error) {
 
 // dashboardResult is the dashboard as the API returns it.
 type dashboardResult struct {
-	Title                string      `json:"dashboard_title"`
-	Slug                 string      `json:"slug"`
-	CSS                  string      `json:"css"`
-	Metadata             string      `json:"json_metadata"`
-	Layout               string      `json:"position_json"`
-	Published            bool        `json:"published"`
-	CertifiedBy          string      `json:"certified_by"`
-	CertificationDetails string      `json:"certification_details"`
-	Owners               []namedItem `json:"owners"`
-	Roles                []namedItem `json:"roles"`
+	Title                string       `json:"dashboard_title"`
+	Slug                 string       `json:"slug"`
+	CSS                  string       `json:"css"`
+	Metadata             string       `json:"json_metadata"`
+	Layout               string       `json:"position_json"`
+	Published            bool         `json:"published"`
+	CertifiedBy          string       `json:"certified_by"`
+	CertificationDetails string       `json:"certification_details"`
+	Owners               []namedItem  `json:"owners"`
+	Roles                []namedItem  `json:"roles"`
+	Tags                 []tagSummary `json:"tags"`
 }
 
 func dashboardPath(id int64) string {
@@ -162,6 +166,7 @@ func (c *Client) GetDashboard(id int64) (*Dashboard, error) {
 		CertificationDetails: body.Result.CertificationDetails,
 		Owners:               ids(body.Result.Owners),
 		Roles:                ids(body.Result.Roles),
+		Tags:                 customTagNames(body.Result.Tags),
 	}
 	return dashboard, nil
 }

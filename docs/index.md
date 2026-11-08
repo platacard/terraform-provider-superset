@@ -68,6 +68,11 @@ Some resources depend on feature flags of the Superset instance (`FEATURE_FLAGS`
 * `EMBEDDED_SUPERSET`: guest tokens for a dashboard made embeddable with `superset_dashboard_embedding`.
 * `DASHBOARD_RBAC`: the `roles` of a `superset_dashboard` take effect only with it.
 * `ALERT_REPORTS`: the `superset_report` resource. Without the flag, the report API answers 404 to every request.
+* `TAGGING_SYSTEM`: the `superset_tag` resource and the `tags` of `superset_chart` and `superset_dashboard`. The provider only
+  attaches the tags an object is missing and detaches a tag before deleting it, because Superset 3.1 leaves broken relations
+  behind otherwise. Superset 3.1 has a bug of its own with the flag on: it fails to delete a chart or a dashboard whenever
+  another dataset, chart or dashboard has the same numeric id, which is common, because the relations of its own `owner:` and
+  `type:` tags are matched by id only. Keep the flag off on Superset 3.1.
 
 ## Declaring the provider where Superset is not available
 

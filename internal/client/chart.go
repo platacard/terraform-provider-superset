@@ -23,6 +23,9 @@ type Chart struct {
 	CertifiedBy          string
 	CertificationDetails string
 	Owners               []int64
+	// Tags are the names of the tags people attached to the object; the owner, type and
+	// favorite relations Superset keeps as tags are left out.
+	Tags []string
 }
 
 // chartPayload is the body of the create and update requests. Nullable fields are sent as null
@@ -61,17 +64,18 @@ func newChartPayload(chart Chart) chartPayload {
 // chartResult is the chart as the single-chart endpoint returns it. Superset 3.1 leaves the
 // datasource out of this response, and recent versions return the cache timeout as a string.
 type chartResult struct {
-	Name                 string      `json:"slice_name"`
-	VizType              string      `json:"viz_type"`
-	DatasourceID         int64       `json:"datasource_id"`
-	DatasourceType       string      `json:"datasource_type"`
-	Params               string      `json:"params"`
-	QueryContext         string      `json:"query_context"`
-	Description          string      `json:"description"`
-	CacheTimeout         looseInt    `json:"cache_timeout"`
-	CertifiedBy          string      `json:"certified_by"`
-	CertificationDetails string      `json:"certification_details"`
-	Owners               []namedItem `json:"owners"`
+	Name                 string       `json:"slice_name"`
+	VizType              string       `json:"viz_type"`
+	DatasourceID         int64        `json:"datasource_id"`
+	DatasourceType       string       `json:"datasource_type"`
+	Params               string       `json:"params"`
+	QueryContext         string       `json:"query_context"`
+	Description          string       `json:"description"`
+	CacheTimeout         looseInt     `json:"cache_timeout"`
+	CertifiedBy          string       `json:"certified_by"`
+	CertificationDetails string       `json:"certification_details"`
+	Owners               []namedItem  `json:"owners"`
+	Tags                 []tagSummary `json:"tags"`
 }
 
 // chartDatasource is the part of a chart list row that names its datasource.
@@ -153,6 +157,7 @@ func (c *Client) GetChart(id int64) (*Chart, error) {
 		CertifiedBy:          body.Result.CertifiedBy,
 		CertificationDetails: body.Result.CertificationDetails,
 		Owners:               ids(body.Result.Owners),
+		Tags:                 customTagNames(body.Result.Tags),
 	}
 	if chart.DatasourceID == 0 {
 		if err := c.fillChartDatasource(chart); err != nil {

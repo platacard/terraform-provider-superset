@@ -22,6 +22,8 @@ type fakeDashboard struct {
 	dashboard map[string]any
 	charts    []float64
 	deleted   bool
+	// tags, when set, lists the tags of the dashboard the way the tagging system does.
+	tags *fakeTags
 }
 
 func (f *fakeDashboard) serve() {
@@ -117,6 +119,9 @@ func (f *fakeDashboard) serve() {
 				"certification_details": f.dashboard["certification_details"],
 				"owners":                owners,
 				"roles":                 roles,
+			}
+			if f.tags != nil {
+				result["tags"] = f.tags.summaries(3, 3)
 			}
 			return httpmock.NewJsonResponse(200, map[string]any{"id": 3, "result": result})
 		})
