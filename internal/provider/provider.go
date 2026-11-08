@@ -252,12 +252,13 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 // Resources defines the resources implemented in the provider.
 func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewRoleResource,            // New resource
-		NewRolePermissionsResource, // New resource
-		NewDatabaseResource,        // New resource
-		NewMetaDatabaseResource,    // Meta database resource
-		NewDatasetResource,         // New dataset resource
-		NewUserResource,            // New user resource
-		NewCSSTemplateResource,     // CSS template resource
+		NewRoleResource,             // New resource
+		NewRolePermissionsResource,  // New resource
+		NewDatabaseResource,         // New resource
+		NewMetaDatabaseResource,     // Meta database resource
+		NewDatasetResource,          // New dataset resource
+		NewUserResource,             // New user resource
+		NewCSSTemplateResource,      // CSS template resource
+		NewRowLevelSecurityResource, // Row level security rule
 	}
 }
