@@ -226,6 +226,9 @@ func TestAccRolePermissionsResource(t *testing.T) {
 		httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
 			httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
+		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+			httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
+
 		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
 			httpmock.NewStringResponder(200, `{"result": [{"id": 129, "name": "DWH-DB-Connect"}]}`))
 
@@ -282,5 +285,5 @@ resource "superset_role_permissions" "team" {
 			},
 		})
 	})
-	
+
 }
