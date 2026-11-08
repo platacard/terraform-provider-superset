@@ -239,6 +239,7 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 // DataSources defines the data sources implemented in the provider.
 func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		NewRoleDataSource,            // Single role looked up by name
 		NewRolesDataSource,           // Existing data source
 		NewRolePermissionsDataSource, // New data source
 		NewDatabasesDataSource,       // New databases data source
