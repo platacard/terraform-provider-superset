@@ -260,5 +260,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewUserResource,             // New user resource
 		NewCSSTemplateResource,      // CSS template resource
 		NewRowLevelSecurityResource, // Row level security rule
+		NewSavedQueryResource,       // Saved query
+		NewAnnotationLayerResource,  // Annotation layer
 	}
 }

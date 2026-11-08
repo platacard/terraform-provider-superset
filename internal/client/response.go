@@ -29,3 +29,8 @@ func decodeResponse(resp *http.Response, out any, action string) error {
 	}
 	return nil
 }
+
+// marshal is json.Marshal under a name that does not collide with the MarshalJSON methods of payloads.
+func marshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}

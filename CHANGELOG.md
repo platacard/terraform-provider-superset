@@ -1,6 +1,8 @@
 ## 0.6.0 (Unreleased)
 
 FEATURES:
+* **New Resource**: `superset_saved_query` - Manage queries saved in SQL Lab.
+* **New Resource**: `superset_annotation_layer` - Manage annotation layers.
 * **New Resource**: `superset_row_level_security` - Manage row level security rules (SQL clauses applied to datasets for roles).
 * **New Resource**: `superset_css_template` - Manage CSS templates that dashboards can apply.
 * **New Data Source**: `superset_css_template` - Look up a CSS template by name.
