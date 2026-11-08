@@ -28,6 +28,8 @@ type Client struct {
 	Host     string
 	Username string
 	Password string
+	// CSRFEnabled makes write requests carry a CSRF token (see csrfHeaders). Set from the provider's csrf_enabled attribute.
+	CSRFEnabled bool
 
 	mu    sync.Mutex
 	token string
@@ -37,9 +39,10 @@ type Client struct {
 // It does not send any request: authentication happens on the first API call or on Authenticate.
 func NewClient(host, username, password string) *Client {
 	return &Client{
-		Host:     host,
-		Username: username,
-		Password: password,
+		Host:        host,
+		Username:    username,
+		Password:    password,
+		CSRFEnabled: true,
 	}
 }
 
@@ -248,6 +251,25 @@ func (c *Client) GetCSRFToken() (string, []*http.Cookie, error) {
 	return csrfToken, resp.Cookies(), nil
 }
 
+// csrfHeaders returns the headers and cookies a write request needs to pass the Superset CSRF check.
+// When CSRF is disabled on the client, nothing is fetched and the request carries the access token only.
+func (c *Client) csrfHeaders() (map[string]string, []*http.Cookie, error) {
+	if !c.CSRFEnabled {
+		return nil, nil, nil
+	}
+
+	csrfToken, cookies, err := c.GetCSRFToken()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	headers := map[string]string{
+		"X-CSRFToken": csrfToken,
+		"Referer":     c.Host,
+	}
+	return headers, cookies, nil
+}
+
 // GetRoleIDByName retrieves the ID of a role by its name from the Superset API.
 // It sends a GET request to the Superset API to fetch all roles, and then searches for the role with the specified name.
 // If the role is found, its ID is returned. Otherwise, an error is returned.
@@ -376,14 +398,9 @@ func (c *Client) CreateRole(name string) (int64, error) {
 		return existingID, nil
 	}
 
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := "/api/v1/security/roles/"
@@ -480,14 +497,9 @@ func (c *Client) UpdateRole(id int64, name string) error {
 		return nil
 	}
 
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/roles/%d", id)
@@ -513,14 +525,9 @@ func (c *Client) UpdateRole(id int64, name string) error {
 // If there is an error or the response status code is not 204 (No Content) or 200 (OK),
 // it returns an error with the corresponding status code and response body.
 func (c *Client) DeleteRole(id int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/roles/%d", id)
@@ -593,14 +600,9 @@ func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName strin
 // The function sends a POST request to the Superset API to update the role permissions.
 // It returns an error if the request fails or if the response status code is not 200 OK.
 func (c *Client) UpdateRolePermissions(roleID int64, permissionIDs []int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/roles/%d/permissions", roleID)
@@ -623,14 +625,9 @@ func (c *Client) UpdateRolePermissions(roleID int64, permissionIDs []int64) erro
 // It sends a POST request to the Superset API to update the role's permissions.
 // The function returns an error if the request fails or if the response status code is not 200 OK.
 func (c *Client) ClearRolePermissions(roleID int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/roles/%d/permissions", roleID)
@@ -839,14 +836,9 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 // It takes a payload map[string]interface{} as input, which contains the necessary data for creating the database.
 // The function returns a map[string]interface{} containing the response from the API and an error, if any.
 func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return nil, err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/database/", payload, headers, cookies)
@@ -872,14 +864,9 @@ func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]inte
 // UpdateDatabase updates a database with the given ID using the provided payload.
 // It returns the updated database as a map[string]interface{} and an error if any.
 func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}) (map[string]interface{}, error) {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return nil, err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("PUT", fmt.Sprintf("/api/v1/database/%d", databaseID), payload, headers, cookies)
@@ -906,14 +893,9 @@ func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}
 // It sends a DELETE request to the Superset API to delete the database.
 // If the request is successful, it returns nil. Otherwise, it returns an error.
 func (c *Client) DeleteDatabase(databaseID int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("DELETE", fmt.Sprintf("/api/v1/database/%d", databaseID), nil, headers, cookies)
@@ -964,14 +946,9 @@ type DatasetRequest struct {
 
 // CreateDataset creates a new dataset in Superset.
 func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{}, error) {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return nil, err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := "/api/v1/dataset/"
@@ -1046,14 +1023,9 @@ type DatasetUpdateRequest struct {
 
 // UpdateDataset updates an existing dataset (database field cannot be changed).
 func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
@@ -1083,14 +1055,9 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 
 // DeleteDataset deletes a dataset by ID.
 func (c *Client) DeleteDataset(id int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/dataset/%d", id)
@@ -1185,7 +1152,7 @@ type MetaDatabase struct {
 // CreateMetaDatabase creates a meta database connection in Superset.
 // It takes a MetaDatabase struct and returns the created database ID and an error.
 func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
 	}
@@ -1218,11 +1185,6 @@ func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
 		"server_cert":           metaDB.ServerCert,
 		"is_managed_externally": metaDB.IsManagedExternally,
 		"external_url":          metaDB.ExternalURL,
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/database/", payload, headers, cookies)
@@ -1342,7 +1304,7 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 
 // UpdateMetaDatabase updates a meta database with the given ID.
 func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
 	}
@@ -1375,11 +1337,6 @@ func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
 		"server_cert":           metaDB.ServerCert,
 		"is_managed_externally": metaDB.IsManagedExternally,
 		"external_url":          metaDB.ExternalURL,
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("PUT", fmt.Sprintf("/api/v1/database/%d", id), payload, headers, cookies)
@@ -1529,14 +1486,9 @@ func (c *Client) GetUser(id int64) (*User, error) {
 // CreateUser creates a user with the specified parameters in the Superset application.
 // It returns the ID of the created user and any error encountered.
 func (c *Client) CreateUser(username, firstName, lastName, email, password string, active bool, roles []int64) (int64, error) {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := "/api/v1/security/users/"
@@ -1581,14 +1533,9 @@ func (c *Client) CreateUser(username, firstName, lastName, email, password strin
 // If the update is successful, the function returns nil.
 // If the update fails, an error is returned with the corresponding status code and response body.
 func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, password string, active bool, roles []int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/users/%d", id)
@@ -1626,14 +1573,9 @@ func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, pass
 // If there is an error or the response status code is not 204 (No Content) or 200 (OK),
 // it returns an error with the corresponding status code and response body.
 func (c *Client) DeleteUser(id int64) error {
-	csrfToken, cookies, err := c.GetCSRFToken()
+	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
-	}
-
-	headers := map[string]string{
-		"X-CSRFToken": csrfToken,
-		"Referer":     c.Host,
 	}
 
 	endpoint := fmt.Sprintf("/api/v1/security/users/%d", id)

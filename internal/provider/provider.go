@@ -40,6 +40,7 @@ type supersetProviderModel struct {
 	Username            types.String `tfsdk:"username"`
 	Password            types.String `tfsdk:"password"`
 	ValidateCredentials types.Bool   `tfsdk:"validate_credentials"`
+	CSRFEnabled         types.Bool   `tfsdk:"csrf_enabled"`
 }
 
 // Metadata returns the provider type name.
@@ -72,6 +73,12 @@ func (p *supersetProvider) Schema(_ context.Context, _ provider.SchemaRequest, r
 					"When `false`, the provider does not send any request until a resource or data source calls the Superset API, " +
 					"and `host`, `username` and `password` may be left empty. " +
 					"This allows declaring the provider in configurations where Superset is not available and no Superset resources are managed.",
+				Optional: true,
+			},
+			"csrf_enabled": schema.BoolAttribute{
+				Description: "Whether to request a CSRF token from Superset and send it with every write request. Defaults to `true`, " +
+					"which is required by a Superset instance with the default `WTF_CSRF_ENABLED = True`. " +
+					"Set it to `false` for an instance where CSRF protection is disabled to skip the extra request before each write operation.",
 				Optional: true,
 			},
 		},
@@ -114,6 +121,15 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 			path.Root("validate_credentials"),
 			"Unknown Superset Credentials Validation Setting",
 			"The provider cannot create the Superset API client as there is an unknown configuration value for validate_credentials. "+
+				"Either target apply the source of the value first or set the value statically in the configuration.",
+		)
+	}
+
+	if config.CSRFEnabled.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("csrf_enabled"),
+			"Unknown Superset CSRF Setting",
+			"The provider cannot create the Superset API client as there is an unknown configuration value for csrf_enabled. "+
 				"Either target apply the source of the value first or set the value statically in the configuration.",
 		)
 	}
@@ -198,6 +214,7 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 	// Create a new Superset client using the configuration values.
 	// The client authenticates lazily, so log in here only when the credentials must be validated.
 	client := client.NewClient(host, username, password)
+	client.CSRFEnabled = config.CSRFEnabled.IsNull() || config.CSRFEnabled.ValueBool()
 	if validateCredentials {
 		if err := client.Authenticate(); err != nil {
 			resp.Diagnostics.AddError(

@@ -1,3 +1,11 @@
+## 0.5.0 (Unreleased)
+
+FEATURES:
+* provider: New `csrf_enabled` attribute (defaults to `true`). When `false`, the provider does not request a CSRF token before write requests, for Superset instances that run with `WTF_CSRF_ENABLED = False`.
+
+BUG FIXES:
+* resource/superset_dataset, resource/superset_role, resource/superset_role_permissions, resource/superset_user: Write requests now carry the CSRF token, like the database resources already did, so they work on a Superset instance with the default `WTF_CSRF_ENABLED = True`.
+
 ## 0.4.0 (Unreleased)
 
 FEATURES:
