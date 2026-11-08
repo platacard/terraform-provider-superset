@@ -31,6 +31,8 @@ type Client struct {
 	Password string
 	// CSRFEnabled makes write requests carry a CSRF token (see csrfHeaders). Set from the provider's csrf_enabled attribute.
 	CSRFEnabled bool
+	// AuthProvider is the authentication provider named in the login request, "db" (the default) or "ldap".
+	AuthProvider string
 
 	mu    sync.Mutex
 	token string
@@ -47,6 +49,14 @@ func NewClient(host, username, password string) *Client {
 		Password:    password,
 		CSRFEnabled: true,
 	}
+}
+
+// authProvider returns the authentication provider of the login, "db" unless another one is set.
+func (c *Client) authProvider() string {
+	if c.AuthProvider == "" {
+		return "db"
+	}
+	return c.AuthProvider
 }
 
 // Authenticate logs in to Superset unless the client already holds an access token.
@@ -113,7 +123,7 @@ func (c *Client) login() error {
 	payload := map[string]string{
 		"username": c.Username,
 		"password": c.Password,
-		"provider": "db",
+		"provider": c.authProvider(),
 	}
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -132,13 +142,12 @@ func (c *Client) login() error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to authenticate with Superset, status code: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to authenticate with Superset, status code: %d, response: %s", resp.StatusCode, string(body))
 	}
 
 	var result map[string]interface{}

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -14,6 +15,7 @@ type testProviderConfig struct {
 	host, username, password *string
 	validateCredentials      *bool
 	csrfEnabled              *bool
+	authProvider             *string
 }
 
 func strPtr(v string) *string { return &v }
@@ -28,6 +30,9 @@ func configureProvider(t *testing.T, cfg testProviderConfig) *provider.Configure
 	t.Setenv("SUPERSET_HOST", "")
 	t.Setenv("SUPERSET_USERNAME", "")
 	t.Setenv("SUPERSET_PASSWORD", "")
+	if os.Getenv("SUPERSET_AUTH_PROVIDER") == "" {
+		t.Setenv("SUPERSET_AUTH_PROVIDER", "")
+	}
 
 	p := New("test")()
 	schemaResp := &provider.SchemaResponse{}
@@ -53,11 +58,22 @@ func configureProvider(t *testing.T, cfg testProviderConfig) *provider.Configure
 		"password":             str(cfg.password),
 		"validate_credentials": validate,
 		"csrf_enabled":         csrf,
+		"auth_provider":        str(cfg.authProvider),
 	})
 
 	resp := &provider.ConfigureResponse{}
 	p.Configure(ctx, provider.ConfigureRequest{Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: raw}}, resp)
 	return resp
+}
+
+// configuredClient returns the client that Configure stored for resources and data sources.
+func configuredClient(t *testing.T, resp *provider.ConfigureResponse) *client.Client {
+	t.Helper()
+	c, ok := resp.ResourceData.(*client.Client)
+	if !ok {
+		t.Fatalf("expected a *client.Client as resource data, got %T", resp.ResourceData)
+	}
+	return c
 }
 
 func registerTestLogin() {
@@ -149,5 +165,45 @@ func TestConfigureCSRFEnabled(t *testing.T) {
 				t.Fatalf("expected CSRFEnabled=%v, got %v", tc.want, c.CSRFEnabled)
 			}
 		})
+	}
+}
+
+func TestConfigureAuthProvider(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	registerTestLogin()
+	base := testProviderConfig{host: strPtr("http://superset-host"), username: strPtr("user"), password: strPtr("pass")}
+
+	resp := configureProvider(t, base)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("expected no errors, got: %v", resp.Diagnostics)
+	}
+	if got := configuredClient(t, resp).AuthProvider; got != "" {
+		t.Fatalf("expected the default provider, got %q", got)
+	}
+
+	cfg := base
+	cfg.authProvider = strPtr("ldap")
+	resp = configureProvider(t, cfg)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("expected no errors, got: %v", resp.Diagnostics)
+	}
+	if got := configuredClient(t, resp).AuthProvider; got != "ldap" {
+		t.Fatalf("expected the ldap provider, got %q", got)
+	}
+
+	t.Setenv("SUPERSET_AUTH_PROVIDER", "oauth")
+	resp = configureProvider(t, base)
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected an error for an unsupported provider in the environment")
+	}
+
+	t.Setenv("SUPERSET_AUTH_PROVIDER", "ldap")
+	resp = configureProvider(t, base)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("expected no errors, got: %v", resp.Diagnostics)
+	}
+	if got := configuredClient(t, resp).AuthProvider; got != "ldap" {
+		t.Fatalf("expected the ldap provider from the environment, got %q", got)
 	}
 }

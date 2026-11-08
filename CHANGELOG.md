@@ -1,6 +1,7 @@
 ## 0.6.0 (Unreleased)
 
 FEATURES:
+* provider: New `auth_provider` attribute (`db`, the default, or `ldap`), also settable with `SUPERSET_AUTH_PROVIDER`, naming the authentication provider of the login for instances that authenticate against LDAP.
 * **New Resource**: `superset_chart` - Manage charts.
 * **New Resource**: `superset_dashboard` - Manage dashboards, their settings, their layout and the charts placed on them.
 * **New Resource**: `superset_dashboard_embedding` - Make a dashboard embeddable with the Superset embedded SDK.
@@ -13,6 +14,7 @@ FEATURES:
 * **New Data Source**: `superset_role` - Look up a role by name, for example to reference its id in `superset_user.roles`.
 
 IMPROVEMENTS:
+* provider: A failed login reports the response of Superset, for example `Alternative authentication provider is not allowed`, instead of the status code alone.
 * resource/superset_database: The connection can be given as a full `sqlalchemy_uri` instead of its parts, and the resource manages `allow_file_upload`, `impersonate_user`, `cache_timeout`, `force_ctas_schema`, `extra`, `masked_encrypted_extra`, `server_cert` and an `ssh_tunnel`. A host or tunnel server changed in the UI is reported as drift.
 * provider: Lists (roles, users, databases, datasets, permissions) are read page by page, so instances with more entries than the server's page size limit (100 by default) are handled completely instead of being cut off.
 * resource/superset_role_permissions, data-source/superset_role_permissions: Roles are looked up by name with a filtered request, and permissions are resolved with two small requests per view menu, run concurrently and cached for the run, instead of scanning the whole permission catalogue, which on large instances could not be fetched completely. Permissions are sent to Superset in the order of the configuration.
