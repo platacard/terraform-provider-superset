@@ -45,6 +45,16 @@ The `superset_role`, `superset_role_permissions` and `superset_user` resources a
 `/roles/`, `/permissions-resources/`). Superset only exposes it with `FAB_ADD_SECURITY_API = True` in `superset_config.py`
 (the default in recent versions). Without it these endpoints answer 404, which the provider reports with this explanation.
 
+## Feature flags
+
+Some resources depend on feature flags of the Superset instance (`FEATURE_FLAGS` in `superset_config.py`):
+
+* `ENABLE_TEMPLATE_PROCESSING`: Jinja templates in the SQL of a `superset_dataset`. Superset runs the query when the dataset
+  is created, so without the flag a query that contains `{{ "{{ ... }}" }}` fails to create the dataset.
+* `SSH_TUNNELING`: the `ssh_tunnel` of a `superset_database`.
+* `EMBEDDED_SUPERSET`: guest tokens for a dashboard made embeddable with `superset_dashboard_embedding`.
+* `DASHBOARD_RBAC`: the `roles` of a `superset_dashboard` take effect only with it.
+
 ## Declaring the provider where Superset is not available
 
 Terraform configures every provider declared in a configuration, even if it manages no resources.

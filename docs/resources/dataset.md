@@ -3,62 +3,36 @@
 page_title: "superset_dataset Resource - superset"
 subcategory: ""
 description: |-
-  Manages a dataset in Superset.
+  Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its count metric itself.
 ---
 
 # superset_dataset (Resource)
 
-Manages a dataset in Superset.
+Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself.
 
 ## Example Usage
 
 ```terraform
-resource "superset_dataset" "example" {
-  table_name    = "example_table"
-  database_name = "PostgreSQL"
+# A table of a database. Superset detects the columns and creates the count metric itself.
+resource "superset_dataset" "sales" {
+  table_name    = "sales"
+  database_name = superset_database.warehouse.connection_name
   schema        = "public"
-  sql           = <<-EOF
-    WITH RECURSIVE recursive_sequence AS (
-      SELECT 1 as level, 1 as value, 'Level One' as description
-      UNION ALL
-      SELECT
-        level + 1,
-        value * 2,
-        CASE
-          WHEN level + 1 <= 3 THEN CONCAT('Level ',
-            CASE level + 1
-              WHEN 2 THEN 'Two'
-              WHEN 3 THEN 'Three'
-            END)
-          ELSE 'Max Level'
-        END
-      FROM recursive_sequence
-      WHERE level < 5
-    ),
-    calculated_data AS (
-      SELECT
-        level,
-        value,
-        description,
-        value * 1.5 as weighted_value,
-        ROUND(LN(value::numeric), 2) as log_value,  -- Изменено LN + приведение к numeric
-        ROW_NUMBER() OVER (ORDER BY level) as row_num
-      FROM recursive_sequence
-    )
-    SELECT
-      level as hierarchy_level,
-      value as base_value,
-      weighted_value,
-      log_value,
-      description as level_description,
-      CASE
-        WHEN row_num % 2 = 0 THEN 'Even'
-        ELSE 'Odd'
-      END as parity,
-      NOW() as generated_timestamp
-    FROM calculated_data
-    ORDER BY level
-  EOF
+  description   = "One row per sale"
+  cache_timeout = 600
+  main_dttm_col = "sold_at"
+
+  extra = jsonencode({
+    certification = { certified_by = "Data team", details = "Reviewed monthly" }
+  })
+}
+
+# A virtual dataset defined by a query with a Jinja parameter.
+resource "superset_dataset" "signups_per_day" {
+  table_name      = "signups_per_day"
+  database_name   = superset_database.warehouse.connection_name
+  sql             = "SELECT day, count(*) AS signups FROM signups WHERE region = '{{ region }}' GROUP BY day"
+  template_params = jsonencode({ region = "eu" })
 }
 ```
 
@@ -67,13 +41,24 @@ resource "superset_dataset" "example" {
 
 ### Required
 
-- `database_name` (String) Name of the database where the dataset resides. Cannot be changed after creation.
-- `table_name` (String) Name of the table or dataset.
+- `database_name` (String) Name of the database connection the dataset belongs to. Changing it replaces the dataset.
+- `table_name` (String) Name of the table, or name of the virtual dataset.
 
 ### Optional
 
-- `schema` (String) Database schema name (optional).
-- `sql` (String) SQL query for the dataset (optional, for SQL-based datasets).
+- `always_filter_main_dttm` (Boolean) Whether the time range of a chart is always applied to the main datetime column, even when the chart filters another one. Defaults to `false`.
+- `cache_timeout` (Number) Duration in seconds for which the charts of the dataset are cached. Unset to use the timeout of the database.
+- `default_endpoint` (String) URL Superset redirects to when the dataset is opened.
+- `description` (String) Free-text description of the dataset.
+- `extra` (String) JSON document with extra settings of the dataset, such as `certification` or `warning_markdown`.
+- `fetch_values_predicate` (String) SQL predicate applied when Superset fetches the distinct values of a column for a filter.
+- `filter_select_enabled` (Boolean) Whether filters of the dataset offer the distinct values of a column. Defaults to `true`.
+- `main_dttm_col` (String) Column used as the default time column of the dataset. Superset picks the first datetime column when unset.
+- `normalize_columns` (Boolean) Whether the names of the columns are normalized to lower case when they are fetched from the source. Defaults to `false`.
+- `owners` (Set of Number) Identifiers of the users who own the dataset. Defaults to the user the provider authenticates as.
+- `schema` (String) Schema of the table.
+- `sql` (String) SQL query of a virtual dataset. Superset runs it when the dataset is created to detect the columns, so it must be valid at that time: Jinja templates need the `ENABLE_TEMPLATE_PROCESSING` feature flag, and on Superset 3.1, whose create endpoint does not take `template_params`, their parameters need a default such as `{{ region | default('eu') }}`.
+- `template_params` (String) JSON object with the default values of the Jinja template parameters of the SQL query. Recent versions of Superset apply them when the dataset is created; Superset 3.1 only after.
 
 ### Read-Only
 
