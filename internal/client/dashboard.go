@@ -205,3 +205,34 @@ func (c *Client) DeleteDashboard(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete dashboard")
 }
+
+// DashboardSummary is a dashboard as the list endpoint describes it.
+type DashboardSummary struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"dashboard_title"`
+	Slug      string `json:"slug"`
+	Published bool   `json:"published"`
+	Status    string `json:"status"`
+	URL       string `json:"url"`
+}
+
+// FindDashboards returns the dashboards with exactly the given slug, or, when the slug is
+// empty, exactly the given title. The server filters on equality; the value is compared again
+// because the comparison can be case-insensitive depending on the metadata database.
+func (c *Client) FindDashboards(slug, title string) ([]DashboardSummary, error) {
+	column, value := "slug", slug
+	if slug == "" {
+		column, value = "dashboard_title", title
+	}
+	rows, err := listInto[DashboardSummary](c, dashboardsPath, equals(column, value))
+	if err != nil {
+		return nil, fmt.Errorf("dashboards with %s %q: %w", column, value, err)
+	}
+	matches := make([]DashboardSummary, 0, len(rows))
+	for _, row := range rows {
+		if (slug != "" && row.Slug == slug) || (slug == "" && row.Title == title) {
+			matches = append(matches, row)
+		}
+	}
+	return matches, nil
+}

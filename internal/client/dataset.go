@@ -437,3 +437,40 @@ func (c *Client) DeleteDataset(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete dataset")
 }
+
+// DatasetSummary is a dataset as the list endpoint describes it.
+type DatasetSummary struct {
+	ID        int64  `json:"id"`
+	TableName string `json:"table_name"`
+	Schema    string `json:"schema"`
+	SQL       string `json:"sql"`
+	Kind      string `json:"kind"`
+	Database  struct {
+		ID   int64  `json:"id"`
+		Name string `json:"database_name"`
+	} `json:"database"`
+}
+
+// FindDatasets returns the datasets with exactly the given table name, narrowed down to a
+// schema and a database when they are set. The names are compared again because the server
+// comparison can be case-insensitive.
+func (c *Client) FindDatasets(table, schema string, databaseID *int64) ([]DatasetSummary, error) {
+	filters := []listFilter{equals("table_name", table)}
+	if schema != "" {
+		filters = append(filters, equals("schema", schema))
+	}
+	if databaseID != nil {
+		filters = append(filters, relatedTo("database", *databaseID))
+	}
+	rows, err := listInto[DatasetSummary](c, datasetsPath, filters...)
+	if err != nil {
+		return nil, fmt.Errorf("datasets named %q: %w", table, err)
+	}
+	matches := make([]DatasetSummary, 0, len(rows))
+	for _, row := range rows {
+		if row.TableName == table && (schema == "" || row.Schema == schema) {
+			matches = append(matches, row)
+		}
+	}
+	return matches, nil
+}

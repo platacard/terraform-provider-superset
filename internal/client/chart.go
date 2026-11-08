@@ -201,3 +201,34 @@ func (c *Client) DeleteChart(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete chart")
 }
+
+// ChartSummary is a chart as the list endpoint describes it.
+type ChartSummary struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"slice_name"`
+	VizType        string `json:"viz_type"`
+	DatasourceID   int64  `json:"datasource_id"`
+	DatasourceType string `json:"datasource_type"`
+	Description    string `json:"description"`
+	URL            string `json:"url"`
+}
+
+// FindCharts returns the charts with exactly the given name, on the given datasource when one
+// is set. The name is compared again because the server comparison can be case-insensitive.
+func (c *Client) FindCharts(name string, datasourceID *int64) ([]ChartSummary, error) {
+	filters := []listFilter{equals("slice_name", name)}
+	if datasourceID != nil {
+		filters = append(filters, equalsInt("datasource_id", *datasourceID))
+	}
+	rows, err := listInto[ChartSummary](c, chartsPath, filters...)
+	if err != nil {
+		return nil, fmt.Errorf("charts named %q: %w", name, err)
+	}
+	matches := make([]ChartSummary, 0, len(rows))
+	for _, row := range rows {
+		if row.Name == name {
+			matches = append(matches, row)
+		}
+	}
+	return matches, nil
+}
