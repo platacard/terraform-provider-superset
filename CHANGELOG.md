@@ -3,6 +3,7 @@
 FEATURES:
 * **New Resource**: `superset_chart` - Manage charts.
 * **New Resource**: `superset_dashboard` - Manage dashboards, their settings, their layout and the charts placed on them.
+* **New Resource**: `superset_dashboard_embedding` - Make a dashboard embeddable with the Superset embedded SDK.
 * **New Resource**: `superset_saved_query` - Manage queries saved in SQL Lab.
 * **New Resource**: `superset_annotation_layer` - Manage annotation layers.
 * **New Resource**: `superset_row_level_security` - Manage row level security rules (SQL clauses applied to datasets for roles).

@@ -25,16 +25,17 @@ type Dashboard struct {
 	Roles                []int64
 }
 
-// dashboardPayload is the body of the create and update requests. Nullable fields are sent as
-// null when empty, so an update can clear them. Owners are only sent when set: Superset makes
-// the current user the owner of a dashboard created without owners. Roles are always sent, so
-// an update can revoke them.
+// dashboardPayload is the body of the create and update requests. The create endpoint rejects a
+// null css, metadata or layout, so those are sent as empty strings when empty, which clears them
+// on an update as well. The other nullable fields are sent as null when empty, so an update can
+// clear them. Owners are only sent when set: Superset makes the current user the owner of a
+// dashboard created without owners. Roles are always sent, so an update can revoke them.
 type dashboardPayload struct {
 	Title                string  `json:"dashboard_title"`
 	Slug                 *string `json:"slug"`
-	CSS                  *string `json:"css"`
-	Metadata             *string `json:"json_metadata"`
-	Layout               *string `json:"position_json"`
+	CSS                  string  `json:"css"`
+	Metadata             string  `json:"json_metadata"`
+	Layout               string  `json:"position_json"`
 	Published            bool    `json:"published"`
 	CertifiedBy          *string `json:"certified_by"`
 	CertificationDetails *string `json:"certification_details"`
@@ -46,9 +47,9 @@ func newDashboardPayload(dashboard Dashboard, metadata string) dashboardPayload 
 	return dashboardPayload{
 		Title:                dashboard.Title,
 		Slug:                 nullIfEmpty(dashboard.Slug),
-		CSS:                  nullIfEmpty(dashboard.CSS),
-		Metadata:             nullIfEmpty(metadata),
-		Layout:               nullIfEmpty(dashboard.Layout),
+		CSS:                  dashboard.CSS,
+		Metadata:             metadata,
+		Layout:               dashboard.Layout,
 		Published:            dashboard.Published,
 		CertifiedBy:          nullIfEmpty(dashboard.CertifiedBy),
 		CertificationDetails: nullIfEmpty(dashboard.CertificationDetails),
