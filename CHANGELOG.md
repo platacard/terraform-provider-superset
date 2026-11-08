@@ -1,5 +1,8 @@
 ## 0.6.0 (Unreleased)
 
+FEATURES:
+* **New Data Source**: `superset_role` - Look up a role by name, for example to reference its id in `superset_user.roles`.
+
 IMPROVEMENTS:
 * provider: Lists (roles, users, databases, datasets, permissions) are read page by page, so instances with more entries than the server's page size limit (100 by default) are handled completely instead of being cut off.
 * resource/superset_role_permissions, data-source/superset_role_permissions: Roles are looked up by name with a filtered request, and permissions are resolved with two small requests per view menu, run concurrently and cached for the run, instead of scanning the whole permission catalogue, which on large instances could not be fetched completely. Permissions are sent to Superset in the order of the configuration.
