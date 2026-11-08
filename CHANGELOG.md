@@ -1,4 +1,4 @@
-## 0.6.0 (Unreleased)
+## 0.6.0 (2026-11-08)
 
 FEATURES:
 * provider: New `auth_provider` attribute (`db`, the default, or `ldap`), also settable with `SUPERSET_AUTH_PROVIDER`, naming the authentication provider of the login for instances that authenticate against LDAP.
