@@ -281,6 +281,9 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatasetDataSource,         // Dataset looked up by table name
 		NewChartDataSource,           // Chart looked up by name
 		NewDashboardDataSource,       // Dashboard looked up by slug or title
+		NewDatabaseSchemasDataSource, // Schemas of a database connection
+		NewDatabaseTablesDataSource,  // Tables of a schema
+		NewDatabaseTableDataSource,   // Columns of a table
 	}
 }
 
