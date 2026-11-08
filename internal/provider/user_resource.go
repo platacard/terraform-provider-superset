@@ -208,8 +208,9 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	state.Email = types.StringValue(user.Email)
 	state.Active = types.BoolValue(user.Active)
 
-	// Convert roles to list
-	rolesList, diags := types.ListValueFrom(ctx, types.Int64Type, user.Roles)
+	// Superset returns the roles in its own order; keep the order of the state when the set of
+	// roles is unchanged, otherwise a reordered list would show up as a change on every plan.
+	rolesList, diags := types.ListValueFrom(ctx, types.Int64Type, roleIDsInStateOrder(ctx, state.Roles, user.Roles))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -337,4 +338,26 @@ func (r *userResource) Configure(_ context.Context, req resource.ConfigureReques
 	}
 
 	r.client = client
+}
+
+// roleIDsInStateOrder returns the role ids reported by Superset in the order they have in the
+// state when both hold the same set of roles, and in Superset's order otherwise.
+func roleIDsInStateOrder(ctx context.Context, state types.List, reported []int64) []int64 {
+	if state.IsNull() || state.IsUnknown() {
+		return reported
+	}
+	var current []int64
+	if state.ElementsAs(ctx, &current, false).HasError() || len(current) != len(reported) {
+		return reported
+	}
+	have := make(map[int64]bool, len(reported))
+	for _, id := range reported {
+		have[id] = true
+	}
+	for _, id := range current {
+		if !have[id] {
+			return reported
+		}
+	}
+	return current
 }
