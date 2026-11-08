@@ -3,12 +3,12 @@
 page_title: "superset_user Resource - superset"
 subcategory: ""
 description: |-
-  Manages a user in Superset.
+  Manages a user in Superset. Requires the Flask-AppBuilder security API, which Superset enables with FAB_ADD_SECURITY_API = True in superset_config.py.
 ---
 
 # superset_user (Resource)
 
-Manages a user in Superset.
+Manages a user in Superset. Requires the Flask-AppBuilder security API, which Superset enables with `FAB_ADD_SECURITY_API = True` in `superset_config.py`.
 
 ## Example Usage
 

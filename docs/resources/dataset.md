@@ -78,6 +78,8 @@ resource "superset_dataset" "example" {
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the dataset.
+- `perm` (String) View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.
+- `schema_perm` (String) View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.
 
 ## Import
 

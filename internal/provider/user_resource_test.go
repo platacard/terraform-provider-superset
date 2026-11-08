@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -182,6 +183,31 @@ resource "superset_user" "ordered" {
 			{
 				Config:   config,
 				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// Without FAB_ADD_SECURITY_API Superset answers the users endpoint with the 404 of a missing
+// route; the provider must explain it instead of reporting a raw 404.
+func TestAccUserResourceSecurityAPIDisabled(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
+		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/users/",
+		httpmock.NewStringResponder(404, `{"errors": [{"message": "404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.", "error_type": "GENERIC_BACKEND_ERROR", "level": "error"}]}`))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      providerConfig + testAccUserResourceConfig,
+				ExpectError: regexp.MustCompile("FAB_ADD_SECURITY_API"),
 			},
 		},
 	})

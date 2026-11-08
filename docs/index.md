@@ -51,6 +51,13 @@ provider "superset" {
 The LDAP user must have a role that allows the operations of the configuration, for example through
 `AUTH_USER_REGISTRATION_ROLE` or the role mapping of the instance.
 
+## Security API
+
+The `superset_role`, `superset_role_permissions` and `superset_user` resources and the `superset_roles`, `superset_role`,
+`superset_role_permissions` and `superset_users` data sources use the Flask-AppBuilder security API (`/api/v1/security/users/`,
+`/roles/`, `/permissions-resources/`). Superset only exposes it with `FAB_ADD_SECURITY_API = True` in `superset_config.py`
+(the default in recent versions). Without it these endpoints answer 404, which the provider reports with this explanation.
+
 ## Declaring the provider where Superset is not available
 
 Terraform configures every provider declared in a configuration, even if it manages no resources.
