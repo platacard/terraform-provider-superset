@@ -26,7 +26,7 @@ func TestAccRolePermissionsResource(t *testing.T) {
 			httpmock.NewStringResponder(200, `{"result": {"id": 129, "name": "DWH-DB-Connect"}}`))
 
 		// Mock the Superset API response for fetching roles
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/roles/"),
 			httpmock.NewStringResponder(200, `{
 				"result": [
 					{"id": 129, "name": "DWH-DB-Connect"}
@@ -34,7 +34,11 @@ func TestAccRolePermissionsResource(t *testing.T) {
 			}`))
 
 		// Mock the Superset API response for fetching permissions resources
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/permissions-resources?q=(page_size:5000)",
+		// Mock the view menu lookup used to resolve permissions by name
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/resources/"),
+			httpmock.NewStringResponder(200, `{"result": [{"id": 1, "name": "[SelfPostgreSQL].(id:1)"}, {"id": 2, "name": "[Trino].[devoriginationzestorage]"}]}`))
+
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/permissions-resources/"),
 			httpmock.NewStringResponder(200, `{ "result": [
 				{
 					"id": 240,
@@ -120,7 +124,7 @@ func TestAccRolePermissionsResource(t *testing.T) {
 			httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
 		// Mock the Superset API response for fetching roles
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/roles/"),
 			httpmock.NewStringResponder(200, `{
 				"result": [
 					{"id": 129, "name": "DWH-DB-Connect"}
@@ -128,7 +132,11 @@ func TestAccRolePermissionsResource(t *testing.T) {
 			}`))
 
 		// Mock the Superset API response for fetching permissions resources
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/permissions-resources?q=(page_size:5000)",
+		// Mock the view menu lookup used to resolve permissions by name
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/resources/"),
+			httpmock.NewStringResponder(200, `{"result": [{"id": 1, "name": "[SelfPostgreSQL].(id:1)"}, {"id": 2, "name": "[Trino].[devoriginationzestorage]"}]}`))
+
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/permissions-resources/"),
 			httpmock.NewStringResponder(200, `{ "result": [
 				{
 					"id": 240,
@@ -229,10 +237,14 @@ func TestAccRolePermissionsResource(t *testing.T) {
 		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
 			httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/roles/"),
 			httpmock.NewStringResponder(200, `{"result": [{"id": 129, "name": "DWH-DB-Connect"}]}`))
 
-		httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/permissions-resources?q=(page_size:5000)",
+		// Mock the view menu lookup used to resolve permissions by name
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/resources/"),
+			httpmock.NewStringResponder(200, `{"result": [{"id": 1, "name": "[SelfPostgreSQL].(id:1)"}, {"id": 2, "name": "[Trino].[devoriginationzestorage]"}]}`))
+
+		httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/permissions-resources/"),
 			httpmock.NewStringResponder(200, `{"result": [
 				{"id": 240, "permission": {"name": "database_access"}, "view_menu": {"name": "[SelfPostgreSQL].(id:1)"}},
 				{"id": 241, "permission": {"name": "schema_access"}, "view_menu": {"name": "[Trino].[devoriginationzestorage]"}}

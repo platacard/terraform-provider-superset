@@ -129,19 +129,27 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 		"roleID": roleID,
 	})
 
-	// Prepare permission IDs from plan using a map to ensure unique IDs
-	var resourcePermissions []resourcePermissionModel
-	permissionIDs := map[int64]bool{}
+	// Resolve the permission ids by name; distinct view menus are looked up concurrently
+	refs := make([]client.PermissionRef, 0, len(plan.ResourcePermissions))
 	for _, perm := range plan.ResourcePermissions {
-		permID, err := r.client.GetPermissionIDByNameAndView(perm.Permission.ValueString(), perm.ViewMenu.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Error finding permission ID",
-				fmt.Sprintf("Could not find permission ID for '%s' and view '%s': %s", perm.Permission.ValueString(), perm.ViewMenu.ValueString(), err),
-			)
-			return
+		refs = append(refs, client.PermissionRef{Permission: perm.Permission.ValueString(), ViewMenu: perm.ViewMenu.ValueString()})
+	}
+	ids, err := r.client.ResolvePermissionIDs(refs)
+	if err != nil {
+		resp.Diagnostics.AddError("Error finding permission ID", err.Error())
+		return
+	}
+
+	// Keep the configuration order and drop duplicates, so Superset stores the permissions in that order
+	var resourcePermissions []resourcePermissionModel
+	var permIDList []int64
+	seen := map[int64]bool{}
+	for i, perm := range plan.ResourcePermissions {
+		permID := ids[refs[i]]
+		if !seen[permID] {
+			seen[permID] = true
+			permIDList = append(permIDList, permID)
 		}
-		permissionIDs[permID] = true
 		resourcePermissions = append(resourcePermissions, resourcePermissionModel{
 			ID:         types.Int64Value(permID),
 			Permission: perm.Permission,
@@ -150,14 +158,8 @@ func (r *rolePermissionsResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	tflog.Debug(ctx, "Permission IDs prepared", map[string]interface{}{
-		"permissionIDs": permissionIDs,
+		"permissionIDs": permIDList,
 	})
-
-	// Convert map to slice for the API call
-	var permIDList []int64
-	for id := range permissionIDs {
-		permIDList = append(permIDList, id)
-	}
 
 	tflog.Debug(ctx, "Permission ID list for API call", map[string]interface{}{
 		"permIDList": permIDList,
@@ -319,19 +321,27 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 		"roleID": roleID,
 	})
 
-	// Prepare permission IDs from plan using a map to ensure unique IDs
-	var resourcePermissions []resourcePermissionModel
-	permissionIDs := map[int64]bool{}
+	// Resolve the permission ids by name; distinct view menus are looked up concurrently
+	refs := make([]client.PermissionRef, 0, len(plan.ResourcePermissions))
 	for _, perm := range plan.ResourcePermissions {
-		permID, err := r.client.GetPermissionIDByNameAndView(perm.Permission.ValueString(), perm.ViewMenu.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Error finding permission ID",
-				fmt.Sprintf("Could not find permission ID for '%s' and view '%s': %s", perm.Permission.ValueString(), perm.ViewMenu.ValueString(), err),
-			)
-			return
+		refs = append(refs, client.PermissionRef{Permission: perm.Permission.ValueString(), ViewMenu: perm.ViewMenu.ValueString()})
+	}
+	ids, err := r.client.ResolvePermissionIDs(refs)
+	if err != nil {
+		resp.Diagnostics.AddError("Error finding permission ID", err.Error())
+		return
+	}
+
+	// Keep the configuration order and drop duplicates, so Superset stores the permissions in that order
+	var resourcePermissions []resourcePermissionModel
+	var permIDList []int64
+	seen := map[int64]bool{}
+	for i, perm := range plan.ResourcePermissions {
+		permID := ids[refs[i]]
+		if !seen[permID] {
+			seen[permID] = true
+			permIDList = append(permIDList, permID)
 		}
-		permissionIDs[permID] = true
 		resourcePermissions = append(resourcePermissions, resourcePermissionModel{
 			ID:         types.Int64Value(permID),
 			Permission: perm.Permission,
@@ -340,14 +350,8 @@ func (r *rolePermissionsResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	tflog.Debug(ctx, "Permission IDs prepared", map[string]interface{}{
-		"permissionIDs": permissionIDs,
+		"permissionIDs": permIDList,
 	})
-
-	// Convert map to slice for the API call
-	var permIDList []int64
-	for id := range permissionIDs {
-		permIDList = append(permIDList, id)
-	}
 
 	tflog.Debug(ctx, "Permission ID list for API call", map[string]interface{}{
 		"permIDList": permIDList,

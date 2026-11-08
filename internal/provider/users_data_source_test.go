@@ -17,7 +17,7 @@ func TestAccUsersDataSource(t *testing.T) {
 		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
 
 	// Mock the Superset API response for fetching users
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/users/?q=(page_size:5000)",
+	httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/users/"),
 		httpmock.NewStringResponder(200, `{
 			"result": [
 				{

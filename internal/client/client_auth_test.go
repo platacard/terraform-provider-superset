@@ -2,6 +2,7 @@ package client
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -156,8 +157,8 @@ func TestMissingSettingsAreReportedOnFirstUse(t *testing.T) {
 // registerRoleCreation serves the endpoints CreateRole uses; the creation succeeds only with the given CSRF token
 // (an empty token means the request must carry no token at all).
 func registerRoleCreation(wantCSRF string) {
-	httpmock.RegisterResponder("GET", testHost+"/api/v1/security/roles?q=(page_size:5000)",
-		httpmock.NewStringResponder(200, `{"result": []}`))
+	httpmock.RegisterResponder("GET", "=~^"+regexp.QuoteMeta(testHost+"/api/v1/security/roles/")+`\?`,
+		httpmock.NewStringResponder(200, `{"count": 0, "result": []}`))
 	httpmock.RegisterResponder("POST", testHost+"/api/v1/security/roles/",
 		func(req *http.Request) (*http.Response, error) {
 			if req.Header.Get("X-CSRFToken") != wantCSRF {
