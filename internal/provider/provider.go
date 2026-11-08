@@ -265,5 +265,8 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewChartResource,              // Chart
 		NewDashboardResource,          // Dashboard
 		NewDashboardEmbeddingResource, // Dashboard embedding
+		NewDashboardImportResource,    // Dashboard import
+		NewChartImportResource,        // Chart import
+		NewDatasetImportResource,      // Dataset import
 	}
 }
