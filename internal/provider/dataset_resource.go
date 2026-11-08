@@ -2,14 +2,19 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -20,6 +25,7 @@ var (
 	_ resource.Resource                = &datasetResource{}
 	_ resource.ResourceWithConfigure   = &datasetResource{}
 	_ resource.ResourceWithImportState = &datasetResource{}
+	_ resource.ResourceWithModifyPlan  = &datasetResource{}
 )
 
 // NewDatasetResource is a helper function to simplify the provider implementation.
@@ -27,20 +33,31 @@ func NewDatasetResource() resource.Resource {
 	return &datasetResource{}
 }
 
-// datasetResource is the resource implementation.
+// datasetResource manages a dataset.
 type datasetResource struct {
 	client *client.Client
 }
 
 // datasetResourceModel maps the resource schema data.
 type datasetResourceModel struct {
-	ID           types.Int64  `tfsdk:"id"`
-	TableName    types.String `tfsdk:"table_name"`
-	DatabaseName types.String `tfsdk:"database_name"`
-	Schema       types.String `tfsdk:"schema"`
-	SQL          types.String `tfsdk:"sql"`
-	Perm         types.String `tfsdk:"perm"`
-	SchemaPerm   types.String `tfsdk:"schema_perm"`
+	ID                   types.Int64  `tfsdk:"id"`
+	TableName            types.String `tfsdk:"table_name"`
+	DatabaseName         types.String `tfsdk:"database_name"`
+	Schema               types.String `tfsdk:"schema"`
+	SQL                  types.String `tfsdk:"sql"`
+	Description          types.String `tfsdk:"description"`
+	Owners               types.Set    `tfsdk:"owners"`
+	CacheTimeout         types.Int64  `tfsdk:"cache_timeout"`
+	MainDttmCol          types.String `tfsdk:"main_dttm_col"`
+	TemplateParams       jsonValue    `tfsdk:"template_params"`
+	Extra                jsonValue    `tfsdk:"extra"`
+	FetchValuesPredicate types.String `tfsdk:"fetch_values_predicate"`
+	FilterSelectEnabled  types.Bool   `tfsdk:"filter_select_enabled"`
+	NormalizeColumns     types.Bool   `tfsdk:"normalize_columns"`
+	AlwaysFilterMainDttm types.Bool   `tfsdk:"always_filter_main_dttm"`
+	DefaultEndpoint      types.String `tfsdk:"default_endpoint"`
+	Perm                 types.String `tfsdk:"perm"`
+	SchemaPerm           types.String `tfsdk:"schema_perm"`
 }
 
 // Metadata returns the resource type name.
@@ -51,7 +68,7 @@ func (r *datasetResource) Metadata(_ context.Context, req resource.MetadataReque
 // Schema defines the schema for the resource.
 func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a dataset in Superset.",
+		Description: "Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Description: "Numeric identifier of the dataset.",
@@ -61,19 +78,83 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"table_name": schema.StringAttribute{
-				Description: "Name of the table or dataset.",
+				Description: "Name of the table, or name of the virtual dataset.",
 				Required:    true,
 			},
 			"database_name": schema.StringAttribute{
-				Description: "Name of the database where the dataset resides. Cannot be changed after creation.",
+				Description: "Name of the database connection the dataset belongs to. Changing it replaces the dataset.",
 				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"schema": schema.StringAttribute{
-				Description: "Database schema name (optional).",
+				Description: "Schema of the table.",
 				Optional:    true,
 			},
 			"sql": schema.StringAttribute{
-				Description: "SQL query for the dataset (optional, for SQL-based datasets).",
+				Description: "SQL query of a virtual dataset. Superset runs it when the dataset is created to detect the columns, so it must be valid at that time: Jinja templates need the `ENABLE_TEMPLATE_PROCESSING` feature flag, and on Superset 3.1, whose create endpoint does not take `template_params`, their parameters need a default such as `{{ region | default('eu') }}`.",
+				Optional:    true,
+			},
+			"description": schema.StringAttribute{
+				Description: "Free-text description of the dataset.",
+				Optional:    true,
+			},
+			"owners": schema.SetAttribute{
+				Description: "Identifiers of the users who own the dataset. Defaults to the user the provider authenticates as.",
+				ElementType: types.Int64Type,
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"cache_timeout": schema.Int64Attribute{
+				Description: "Duration in seconds for which the charts of the dataset are cached. Unset to use the timeout of the database.",
+				Optional:    true,
+			},
+			"main_dttm_col": schema.StringAttribute{
+				Description: "Column used as the default time column of the dataset. Superset picks the first datetime column when unset.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"template_params": schema.StringAttribute{
+				Description: "JSON object with the default values of the Jinja template parameters of the SQL query. Recent versions of Superset apply them when the dataset is created; Superset 3.1 only after.",
+				Optional:    true,
+				CustomType:  jsonDocument,
+			},
+			"extra": schema.StringAttribute{
+				Description: "JSON document with extra settings of the dataset, such as `certification` or `warning_markdown`.",
+				Optional:    true,
+				CustomType:  jsonDocument,
+			},
+			"fetch_values_predicate": schema.StringAttribute{
+				Description: "SQL predicate applied when Superset fetches the distinct values of a column for a filter.",
+				Optional:    true,
+			},
+			"filter_select_enabled": schema.BoolAttribute{
+				Description: "Whether filters of the dataset offer the distinct values of a column. Defaults to `true`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+			},
+			"normalize_columns": schema.BoolAttribute{
+				Description: "Whether the names of the columns are normalized to lower case when they are fetched from the source. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"always_filter_main_dttm": schema.BoolAttribute{
+				Description: "Whether the time range of a chart is always applied to the main datetime column, even when the chart filters another one. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"default_endpoint": schema.StringAttribute{
+				Description: "URL Superset redirects to when the dataset is opened.",
 				Optional:    true,
 			},
 			"perm": schema.StringAttribute{
@@ -88,195 +169,124 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	}
 }
 
-// Create creates the resource and sets the initial Terraform state.
+// ModifyPlan fills in the view menus of the permissions of an existing dataset from the planned
+// values, so an update of the dataset does not leave them unknown and does not ripple into the
+// resources that reference them.
+func (r *datasetResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+
+	var plan datasetResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() || plan.ID.IsUnknown() || plan.DatabaseName.IsUnknown() || plan.TableName.IsUnknown() || plan.Schema.IsUnknown() {
+		return
+	}
+	setDatasetPermissions(&plan)
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("perm"), plan.Perm)...)
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("schema_perm"), plan.SchemaPerm)...)
+}
+
+// Create creates the dataset and sets the initial Terraform state. A dataset whose settings
+// could not be written is recorded in the state with an error, so Terraform replaces it.
 func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	// Retrieve values from plan
 	var plan datasetResourceModel
-	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	dataset, diags := r.datasetFromModel(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	tflog.Debug(ctx, "Creating dataset", map[string]interface{}{
-		"table_name":    plan.TableName.ValueString(),
-		"database_name": plan.DatabaseName.ValueString(),
-	})
-
-	// Get database ID by name
-	databaseID, err := r.client.GetDatabaseIDByName(plan.DatabaseName.ValueString())
+	id, err := r.client.CreateDataset(dataset)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error finding database",
-			fmt.Sprintf("Could not find database '%s': %s", plan.DatabaseName.ValueString(), err.Error()),
-		)
-		return
-	}
-
-	// Create dataset request
-	datasetReq := client.DatasetRequest{
-		TableName: plan.TableName.ValueString(),
-		Database:  databaseID,
-		Schema:    plan.Schema.ValueString(),
-		SQL:       plan.SQL.ValueString(),
-	}
-
-	// Create dataset
-	datasetResp, err := r.client.CreateDataset(datasetReq)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error creating dataset",
-			"Could not create dataset: "+err.Error(),
-		)
-		return
-	}
-
-	// Extract ID from response
-	var datasetID int64
-	if id, ok := (*datasetResp)["id"].(float64); ok {
-		datasetID = int64(id)
-	} else {
-		resp.Diagnostics.AddError(
-			"Error creating dataset",
-			"Could not extract ID from create response",
-		)
-		return
-	}
-
-	// Update the state
-	plan.ID = types.Int64Value(datasetID)
-
-	tflog.Debug(ctx, "Created dataset", map[string]interface{}{
-		"id": datasetID,
-	})
-
-	// Set state to fully populated data
-	setDatasetPermissions(&plan)
-	diags = resp.State.Set(ctx, plan)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-}
-
-// Read refreshes the Terraform state with the latest data.
-func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	// Get current state
-	var state datasetResourceModel
-	diags := req.State.Get(ctx, &state)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Get dataset from API
-	dataset, err := r.client.GetDataset(state.ID.ValueInt64())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading dataset",
-			"Could not read dataset ID "+fmt.Sprintf("%d", state.ID.ValueInt64())+": "+err.Error(),
-		)
-		return
-	}
-
-	// Update state from API response
-	if tableName, ok := (*dataset)["table_name"].(string); ok {
-		state.TableName = types.StringValue(tableName)
-	}
-
-	if schema, ok := (*dataset)["schema"].(string); ok {
-		state.Schema = types.StringValue(schema)
-	}
-
-	if sql, ok := (*dataset)["sql"].(string); ok {
-		state.SQL = types.StringValue(sql)
-	}
-
-	// Get database name by ID
-	if database, ok := (*dataset)["database"].(map[string]interface{}); ok {
-		if dbID, ok := database["id"].(float64); ok {
-			databaseName, err := r.client.GetDatabaseNameByID(int64(dbID))
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"Error reading dataset",
-					"Could not get database name: "+err.Error(),
-				)
-				return
-			}
-			state.DatabaseName = types.StringValue(databaseName)
+		resp.Diagnostics.AddError("Unable to Create Superset Dataset", err.Error())
+		if id != 0 {
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
 		}
-	}
-
-	// Set refreshed state
-	setDatasetPermissions(&state)
-	diags = resp.State.Set(ctx, &state)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	r.readInto(ctx, id, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Creation")
 }
 
-// Update updates the resource and sets the updated Terraform state on success.
-func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// Retrieve values from plan
-	var plan datasetResourceModel
-	diags := req.Plan.Get(ctx, &plan)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Update dataset (database cannot be changed, so we don't validate it)
-	err := r.client.UpdateDataset(
-		plan.ID.ValueInt64(),
-		plan.TableName.ValueString(),
-		plan.Schema.ValueString(),
-		plan.SQL.ValueString(),
-	)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error updating dataset",
-			"Could not update dataset ID "+fmt.Sprintf("%d", plan.ID.ValueInt64())+": "+err.Error(),
-		)
-		return
-	}
-
-	tflog.Debug(ctx, "Updated dataset", map[string]interface{}{
-		"id": plan.ID.ValueInt64(),
-	})
-
-	// Set updated state
-	setDatasetPermissions(&plan)
-	diags = resp.State.Set(ctx, plan)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-}
-
-// Delete deletes the resource and removes the Terraform state on success.
-func (r *datasetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	// Retrieve values from state
+// Read refreshes the Terraform state with the dataset as it is in Superset.
+func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state datasetResourceModel
-	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	dataset, err := r.client.GetDataset(state.ID.ValueInt64())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "dataset no longer exists in Superset, removing it from the state", map[string]any{"id": state.ID.ValueInt64()})
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Read Superset Dataset", err.Error())
+		return
+	}
+
+	model, diags := datasetModel(ctx, dataset)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
+}
+
+// Update replaces the settings of the dataset.
+func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state datasetResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	dataset, diags := r.datasetFromModel(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Delete existing dataset
-	err := r.client.DeleteDataset(state.ID.ValueInt64())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error deleting dataset",
-			"Could not delete dataset, unexpected error: "+err.Error(),
-		)
+	if err := r.client.UpdateDataset(state.ID.ValueInt64(), dataset); err != nil {
+		resp.Diagnostics.AddError("Unable to Update Superset Dataset", err.Error())
 		return
 	}
 
-	tflog.Debug(ctx, "Deleted dataset", map[string]interface{}{
-		"id": state.ID.ValueInt64(),
-	})
+	r.readInto(ctx, state.ID.ValueInt64(), &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Update")
+}
+
+// Delete deletes the dataset; a dataset that is already gone is not an error.
+func (r *datasetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state datasetResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	err := r.client.DeleteDataset(state.ID.ValueInt64())
+	if err != nil && !errors.Is(err, client.ErrNotFound) {
+		resp.Diagnostics.AddError("Unable to Delete Superset Dataset", err.Error())
+		return
+	}
+}
+
+// ImportState imports a dataset by its numeric id.
+func (r *datasetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	id, err := strconv.ParseInt(req.ID, 10, 64)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("The import ID %q is not a numeric dataset id.", req.ID))
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
 }
 
 // Configure adds the provider configured client to the resource.
@@ -286,7 +296,6 @@ func (r *datasetResource) Configure(_ context.Context, req resource.ConfigureReq
 	}
 
 	client, ok := req.ProviderData.(*client.Client)
-
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
@@ -298,19 +307,77 @@ func (r *datasetResource) Configure(_ context.Context, req resource.ConfigureReq
 	r.client = client
 }
 
-// ImportState imports the resource state.
-func (r *datasetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Retrieve import ID and save to id attribute
-	id, err := strconv.ParseInt(req.ID, 10, 64)
+// readInto fetches the dataset and stores it in the state after a create or an update, so the
+// state carries the values Superset computed, such as the owners or the main datetime column.
+func (r *datasetResource) readInto(ctx context.Context, id int64, state stateSetter, diags *diag.Diagnostics, summary string) {
+	dataset, err := r.client.GetDataset(id)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error importing dataset",
-			"Could not parse dataset ID: "+err.Error(),
-		)
+		diags.AddError(summary, err.Error())
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+	model, d := datasetModel(ctx, dataset)
+	diags.Append(d...)
+	if diags.HasError() {
+		return
+	}
+	diags.Append(state.Set(ctx, &model)...)
+}
+
+// datasetFromModel builds the dataset of the plan, looking the database up by its name.
+func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel) (client.Dataset, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	databaseID, err := r.client.GetDatabaseIDByName(model.DatabaseName.ValueString())
+	if err != nil {
+		diags.AddAttributeError(path.Root("database_name"), "Unable to Find the Database of the Dataset", err.Error())
+		return client.Dataset{}, diags
+	}
+
+	dataset := client.Dataset{
+		DatabaseID:           databaseID,
+		TableName:            model.TableName.ValueString(),
+		Schema:               model.Schema.ValueString(),
+		SQL:                  model.SQL.ValueString(),
+		Description:          model.Description.ValueString(),
+		CacheTimeout:         model.CacheTimeout.ValueInt64Pointer(),
+		MainDttmCol:          model.MainDttmCol.ValueString(),
+		TemplateParams:       model.TemplateParams.ValueString(),
+		Extra:                model.Extra.ValueString(),
+		FetchValuesPredicate: model.FetchValuesPredicate.ValueString(),
+		FilterSelectEnabled:  model.FilterSelectEnabled.ValueBool(),
+		NormalizeColumns:     model.NormalizeColumns.ValueBool(),
+		AlwaysFilterMainDttm: model.AlwaysFilterMainDttm.ValueBool(),
+		DefaultEndpoint:      model.DefaultEndpoint.ValueString(),
+	}
+	if !model.Owners.IsNull() && !model.Owners.IsUnknown() {
+		diags.Append(model.Owners.ElementsAs(ctx, &dataset.Owners, false)...)
+	}
+	return dataset, diags
+}
+
+// datasetModel maps a dataset to the state, with the view menus of its permissions.
+func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResourceModel, diag.Diagnostics) {
+	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
+	model := datasetResourceModel{
+		ID:                   types.Int64Value(dataset.ID),
+		TableName:            types.StringValue(dataset.TableName),
+		DatabaseName:         types.StringValue(dataset.DatabaseName),
+		Schema:               optionalString(dataset.Schema),
+		SQL:                  optionalString(dataset.SQL),
+		Description:          optionalString(dataset.Description),
+		Owners:               owners,
+		CacheTimeout:         types.Int64PointerValue(dataset.CacheTimeout),
+		MainDttmCol:          optionalString(dataset.MainDttmCol),
+		TemplateParams:       jsonDocument.value(dataset.TemplateParams),
+		Extra:                jsonDocument.value(dataset.Extra),
+		FetchValuesPredicate: optionalString(dataset.FetchValuesPredicate),
+		FilterSelectEnabled:  types.BoolValue(dataset.FilterSelectEnabled),
+		NormalizeColumns:     types.BoolValue(dataset.NormalizeColumns),
+		AlwaysFilterMainDttm: types.BoolValue(dataset.AlwaysFilterMainDttm),
+		DefaultEndpoint:      optionalString(dataset.DefaultEndpoint),
+	}
+	setDatasetPermissions(&model)
+	return model, diags
 }
 
 // setDatasetPermissions derives the view menus of the dataset permissions the way Superset names
