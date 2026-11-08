@@ -52,6 +52,7 @@ type chartResourceModel struct {
 	CertifiedBy          types.String `tfsdk:"certified_by"`
 	CertificationDetails types.String `tfsdk:"certification_details"`
 	Owners               types.Set    `tfsdk:"owners"`
+	Tags                 types.Set    `tfsdk:"tags"`
 }
 
 // Metadata returns the resource type name.
@@ -129,6 +130,15 @@ func (r *chartResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					setplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"tags": schema.SetAttribute{
+				Description: "Names of the tags attached to the chart, with the `TAGGING_SYSTEM` feature flag. When unset, the tags are left as they are; when set, the chart has exactly these tags. Tags that do not exist yet are created, and stay when the chart is destroyed.",
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
 }
@@ -153,6 +163,7 @@ func (r *chartResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	resp.Diagnostics.Append(r.applyTags(ctx, id, plan.Tags, types.SetNull(types.StringType))...)
 	r.readInto(ctx, id, &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Creation")
 }
 
@@ -203,6 +214,8 @@ func (r *chartResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
+	resp.Diagnostics.Append(r.applyTags(ctx, state.ID.ValueInt64(), plan.Tags, state.Tags)...)
+
 	r.readInto(ctx, state.ID.ValueInt64(), &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Update")
 }
 
@@ -249,6 +262,30 @@ func (r *chartResource) Configure(_ context.Context, req resource.ConfigureReque
 	r.client = client
 }
 
+// applyTags attaches and detaches tags so the chart has exactly the planned ones, when the
+// configuration sets them. The tags the chart has are read from Superset rather than taken
+// from the state, so tags attached elsewhere are detached too.
+func (r *chartResource) applyTags(ctx context.Context, id int64, planned, prior types.Set) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if planned.IsNull() || planned.IsUnknown() || planned.Equal(prior) {
+		return diags
+	}
+	var desired []string
+	diags.Append(planned.ElementsAs(ctx, &desired, false)...)
+	if diags.HasError() {
+		return diags
+	}
+	chart, err := r.client.GetChart(id)
+	if err != nil {
+		diags.AddError("Unable to Read the Tags of the Superset Chart", err.Error())
+		return diags
+	}
+	if err := r.client.SetObjectTags(client.ChartObject, id, chart.Tags, desired); err != nil {
+		diags.AddError("Unable to Tag the Superset Chart", err.Error())
+	}
+	return diags
+}
+
 // readInto fetches the chart and stores it in the state after a create or an update, so the
 // state carries the values Superset computed, such as the default owners.
 func (r *chartResource) readInto(ctx context.Context, id int64, state stateSetter, diags *diag.Diagnostics, summary string) {
@@ -289,6 +326,8 @@ func chartFromModel(ctx context.Context, model chartResourceModel) (client.Chart
 
 func chartModel(ctx context.Context, chart *client.Chart) (chartResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, chart.Owners)
+	tags, d := types.SetValueFrom(ctx, types.StringType, nonNilStrings(chart.Tags))
+	diags.Append(d...)
 	model := chartResourceModel{
 		ID:                   types.Int64Value(chart.ID),
 		Name:                 types.StringValue(chart.Name),
@@ -302,6 +341,15 @@ func chartModel(ctx context.Context, chart *client.Chart) (chartResourceModel, d
 		CertifiedBy:          optionalString(chart.CertifiedBy),
 		CertificationDetails: optionalString(chart.CertificationDetails),
 		Owners:               owners,
+		Tags:                 tags,
 	}
 	return model, diags
+}
+
+// nonNilStrings returns an empty slice instead of nil, so a set is never null.
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }

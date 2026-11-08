@@ -299,6 +299,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewSavedQueryResource,         // Saved query
 		NewAnnotationLayerResource,    // Annotation layer
 		NewAnnotationResource,         // Annotation of a layer
+		NewTagResource,                // Tag
 		NewReportResource,             // Report or alert
 		NewChartResource,              // Chart
 		NewDashboardResource,          // Dashboard

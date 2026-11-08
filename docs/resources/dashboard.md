@@ -65,6 +65,7 @@ resource "superset_dashboard" "signups" {
 - `published` (Boolean) Whether the dashboard is published; an unpublished dashboard is a draft visible to its owners only. Defaults to `false`.
 - `roles` (Set of Number) Identifiers of the roles granted access to the dashboard when dashboard role-based access control is enabled.
 - `slug` (String) Unique slug used in the URL of the dashboard instead of its id.
+- `tags` (Set of String) Names of the tags attached to the dashboard, with the `TAGGING_SYSTEM` feature flag. When unset, the tags are left as they are; when set, the dashboard has exactly these tags. Tags that do not exist yet are created, and stay when the dashboard is destroyed.
 
 ### Read-Only
 

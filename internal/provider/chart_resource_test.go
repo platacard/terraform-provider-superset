@@ -22,6 +22,8 @@ type fakeChart struct {
 	mu      sync.Mutex
 	chart   map[string]any
 	deleted bool
+	// tags, when set, lists the tags of the chart the way the tagging system does.
+	tags *fakeTags
 }
 
 func (f *fakeChart) serve() {
@@ -84,6 +86,9 @@ func (f *fakeChart) serve() {
 				"certified_by":          f.chart["certified_by"],
 				"certification_details": f.chart["certification_details"],
 				"owners":                owners,
+			}
+			if f.tags != nil {
+				result["tags"] = f.tags.summaries(2, 7)
 			}
 			return httpmock.NewJsonResponse(200, map[string]any{"id": 7, "result": result})
 		})

@@ -48,6 +48,7 @@ resource "superset_chart" "daily_signups" {
 - `description` (String) Free-text description of the chart.
 - `owners` (Set of Number) Identifiers of the users who own the chart. Defaults to the user the provider authenticates as.
 - `query_context` (String) JSON document with the query context of the chart, which Superset uses for alerts, reports and cache warm-up. When unset, the query context Superset generates on its own is left alone.
+- `tags` (Set of String) Names of the tags attached to the chart, with the `TAGGING_SYSTEM` feature flag. When unset, the tags are left as they are; when set, the chart has exactly these tags. Tags that do not exist yet are created, and stay when the chart is destroyed.
 
 ### Read-Only
 
