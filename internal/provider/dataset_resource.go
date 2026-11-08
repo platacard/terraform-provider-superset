@@ -639,12 +639,18 @@ func configuredBool(configured types.Bool, value bool) types.Bool {
 	return types.BoolValue(value)
 }
 
-// setDatasetPermissions derives the view menus of the dataset permissions the way Superset names
-// them: `[database].[table](id:N)` for the dataset and `[database].[schema]` for its schema.
+// setDatasetPermissions fills in the view menus of the dataset permissions.
 func setDatasetPermissions(model *datasetResourceModel) {
-	model.Perm = types.StringValue(fmt.Sprintf("[%s].[%s](id:%d)", model.DatabaseName.ValueString(), model.TableName.ValueString(), model.ID.ValueInt64()))
-	model.SchemaPerm = types.StringNull()
-	if schema := model.Schema.ValueString(); schema != "" {
-		model.SchemaPerm = types.StringValue(fmt.Sprintf("[%s].[%s]", model.DatabaseName.ValueString(), schema))
+	model.Perm, model.SchemaPerm = datasetPermissions(model.DatabaseName.ValueString(), model.TableName.ValueString(), model.Schema.ValueString(), model.ID.ValueInt64())
+}
+
+// datasetPermissions derives the view menus of the dataset permissions the way Superset names
+// them: `[database].[table](id:N)` for the dataset and `[database].[schema]` for its schema,
+// null without a schema.
+func datasetPermissions(database, table, schema string, id int64) (types.String, types.String) {
+	perm := types.StringValue(fmt.Sprintf("[%s].[%s](id:%d)", database, table, id))
+	if schema == "" {
+		return perm, types.StringNull()
 	}
+	return perm, types.StringValue(fmt.Sprintf("[%s].[%s]", database, schema))
 }

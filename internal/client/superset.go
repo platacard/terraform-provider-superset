@@ -708,19 +708,38 @@ func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
 // GetDatabaseIDByName returns the id of the database connection with the given name, looked up
 // with a filtered request, or ErrNotFound.
 func (c *Client) GetDatabaseIDByName(databaseName string) (int64, error) {
-	rows, err := listInto[struct {
-		ID   int64  `json:"id"`
-		Name string `json:"database_name"`
-	}](c, databasesPath, equals("database_name", databaseName))
+	database, err := c.FindDatabaseByName(databaseName)
 	if err != nil {
-		return 0, fmt.Errorf("database %q: %w", databaseName, err)
+		return 0, err
+	}
+	return database.ID, nil
+}
+
+// DatabaseSummary is a database connection as the list endpoint describes it.
+type DatabaseSummary struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"database_name"`
+	Backend        string `json:"backend"`
+	UUID           string `json:"uuid"`
+	ExposeInSQLLab bool   `json:"expose_in_sqllab"`
+	AllowDML       bool   `json:"allow_dml"`
+	AllowRunAsync  bool   `json:"allow_run_async"`
+}
+
+// FindDatabaseByName returns the database connection with exactly the given name, or
+// ErrNotFound. The server filters on equality; the name is compared again because the
+// comparison can be case-insensitive depending on the metadata database.
+func (c *Client) FindDatabaseByName(databaseName string) (*DatabaseSummary, error) {
+	rows, err := listInto[DatabaseSummary](c, databasesPath, equals("database_name", databaseName))
+	if err != nil {
+		return nil, fmt.Errorf("database %q: %w", databaseName, err)
 	}
 	for _, row := range rows {
 		if row.Name == databaseName {
-			return row.ID, nil
+			return &row, nil
 		}
 	}
-	return 0, fmt.Errorf("database %q: %w", databaseName, ErrNotFound)
+	return nil, fmt.Errorf("database %q: %w", databaseName, ErrNotFound)
 }
 
 // GetDatabaseNameByID finds database name by ID using cached database list.

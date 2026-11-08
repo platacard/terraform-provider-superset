@@ -277,6 +277,10 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatasetsDataSource,        // New datasets data source
 		NewUsersDataSource,           // New users data source
 		NewCSSTemplateDataSource,     // CSS template looked up by name
+		NewDatabaseDataSource,        // Database connection looked up by name
+		NewDatasetDataSource,         // Dataset looked up by table name
+		NewChartDataSource,           // Chart looked up by name
+		NewDashboardDataSource,       // Dashboard looked up by slug or title
 	}
 }
 
