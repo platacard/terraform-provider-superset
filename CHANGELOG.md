@@ -2,6 +2,7 @@
 
 FEATURES:
 * **New Resource**: `superset_report` - Manage the alerts and reports of the Alerts & Reports page: a chart or a dashboard sent to email or Slack recipients on a schedule, or when a SQL query meets a condition.
+* **New Resource**: `superset_assets_import` - Import a whole export bundle (databases, datasets, charts, dashboards and saved queries) at once through the assets endpoint, and again whenever its files change.
 * **New Data Source**: `superset_database_schemas`, `superset_database_tables`, `superset_database_table` - Discover what Superset sees in a database connection: its schemas, the tables and views of a schema, and the columns of a table.
 * **New Resource**: `superset_tag` - Manage tags, with the `TAGGING_SYSTEM` feature flag.
 * resource/superset_chart, resource/superset_dashboard: New `tags` attribute with the names of the tags attached to the object; when unset, the tags are left as they are.

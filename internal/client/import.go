@@ -43,18 +43,34 @@ type ImportOptions struct {
 
 // ImportBundle uploads a bundle to the import endpoint of the kind.
 func (c *Client) ImportBundle(kind ImportKind, content []byte, options ImportOptions) error {
-	headers, cookies, err := c.csrfHeaders()
-	if err != nil {
-		return err
-	}
-
-	var body bytes.Buffer
-	form := multipart.NewWriter(&body)
 	fields := map[string]string{"overwrite": strconv.FormatBool(options.Overwrite)}
 	if kind.Bundle == bundle.Datasets {
 		fields["sync_columns"] = strconv.FormatBool(options.SyncColumns)
 		fields["sync_metrics"] = strconv.FormatBool(options.SyncMetrics)
 	}
+	if err := addSecretFields(fields, options); err != nil {
+		return err
+	}
+	return c.uploadBundle(fmt.Sprintf("/api/v1/%s/import/", kind.Path), "formData", fields, content, "import the "+kind.Path+" bundle")
+}
+
+// ImportAssets uploads a bundle of any assets to the assets import endpoint, which overwrites
+// the objects it holds: databases, datasets, charts, dashboards and saved queries. A sparse
+// import lets the dashboards of the bundle reference charts that are not in it, on recent
+// versions of Superset; the field is only sent when set, as older versions do not know it.
+func (c *Client) ImportAssets(content []byte, options ImportOptions, sparse bool) error {
+	fields := map[string]string{}
+	if sparse {
+		fields["sparse"] = "true"
+	}
+	if err := addSecretFields(fields, options); err != nil {
+		return err
+	}
+	return c.uploadBundle("/api/v1/assets/import/", "bundle", fields, content, "import the assets bundle")
+}
+
+// addSecretFields adds the passwords and SSH tunnel secrets of the options as JSON form fields.
+func addSecretFields(fields map[string]string, options ImportOptions) error {
 	secrets := map[string]map[string]string{
 		"passwords":                        options.DatabasePasswords,
 		"ssh_tunnel_passwords":             options.SSHTunnelPasswords,
@@ -71,12 +87,24 @@ func (c *Client) ImportBundle(kind ImportKind, content []byte, options ImportOpt
 		}
 		fields[field] = string(encoded)
 	}
+	return nil
+}
+
+// uploadBundle posts a bundle as a multipart form with the given fields.
+func (c *Client) uploadBundle(endpoint, fileField string, fields map[string]string, content []byte, action string) error {
+	headers, cookies, err := c.csrfHeaders()
+	if err != nil {
+		return err
+	}
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
 	for field, value := range fields {
 		if err := form.WriteField(field, value); err != nil {
 			return err
 		}
 	}
-	file, err := form.CreateFormFile("formData", "bundle.zip")
+	file, err := form.CreateFormFile(fileField, "bundle.zip")
 	if err != nil {
 		return err
 	}
@@ -91,11 +119,11 @@ func (c *Client) ImportBundle(kind ImportKind, content []byte, options ImportOpt
 		headers = map[string]string{}
 	}
 	headers["Content-Type"] = form.FormDataContentType()
-	resp, err := c.send(http.MethodPost, fmt.Sprintf("/api/v1/%s/import/", kind.Path), body.Bytes(), headers, cookies)
+	resp, err := c.send(http.MethodPost, endpoint, body.Bytes(), headers, cookies)
 	if err != nil {
 		return err
 	}
-	return decodeResponse(resp, nil, "import the "+kind.Path+" bundle")
+	return decodeResponse(resp, nil, action)
 }
 
 // errUUIDFilterUnsupported means that the list endpoint cannot filter by uuid, as on Superset 3.1.

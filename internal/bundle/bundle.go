@@ -31,6 +31,9 @@ var (
 	Dashboards = Kind{Type: "Dashboard", Dir: "dashboards"}
 	Charts     = Kind{Type: "Slice", Dir: "charts"}
 	Datasets   = Kind{Type: "SqlaTable", Dir: "datasets"}
+	// Assets is the kind of a bundle that the assets endpoint imports as a whole; its objects
+	// are listed per kind with Objects, since no directory is its own.
+	Assets = Kind{Type: "assets", Dir: "assets"}
 )
 
 // objectDirs are the directories of an export layout.
