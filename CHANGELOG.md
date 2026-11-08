@@ -1,6 +1,8 @@
 ## 0.6.0 (Unreleased)
 
 FEATURES:
+* **New Resource**: `superset_css_template` - Manage CSS templates that dashboards can apply.
+* **New Data Source**: `superset_css_template` - Look up a CSS template by name.
 * **New Data Source**: `superset_role` - Look up a role by name, for example to reference its id in `superset_user.roles`.
 
 IMPROVEMENTS:
