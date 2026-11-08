@@ -67,6 +67,7 @@ Some resources depend on feature flags of the Superset instance (`FEATURE_FLAGS`
 * `SSH_TUNNELING`: the `ssh_tunnel` of a `superset_database`.
 * `EMBEDDED_SUPERSET`: guest tokens for a dashboard made embeddable with `superset_dashboard_embedding`.
 * `DASHBOARD_RBAC`: the `roles` of a `superset_dashboard` take effect only with it.
+* `ALERT_REPORTS`: the `superset_report` resource. Without the flag, the report API answers 404 to every request.
 
 ## Declaring the provider where Superset is not available
 
