@@ -137,3 +137,52 @@ resource "superset_user" "test_user" {
   roles      = [4]
 }
 `
+
+func TestAccUserResourceRolesKeepConfigurationOrder(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/login",
+		httpmock.NewStringResponder(200, `{"access_token": "fake-token"}`))
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
+		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
+	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/security/users/",
+		httpmock.NewStringResponder(201, `{"id": 101}`))
+	// Superset reports the roles sorted by id, not in the order they were assigned
+	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/users/101",
+		httpmock.NewStringResponder(200, `{"result": {"id": 101, "username": "ordered.user", "first_name": "Ordered",
+			"last_name": "User", "email": "ordered.user@example.com", "active": true,
+			"roles": [{"id": 3, "name": "Alpha"}, {"id": 4, "name": "Gamma"}]}}`))
+	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/security/users/101",
+		httpmock.NewStringResponder(204, ""))
+
+	config := providerConfig + `
+resource "superset_user" "ordered" {
+  username   = "ordered.user"
+  first_name = "Ordered"
+  last_name  = "User"
+  email      = "ordered.user@example.com"
+  password   = "S0meStr0ngPass!"
+  roles      = [4, 3]
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_user.ordered", "roles.#", "2"),
+					resource.TestCheckResourceAttr("superset_user.ordered", "roles.0", "4"),
+					resource.TestCheckResourceAttr("superset_user.ordered", "roles.1", "3"),
+				),
+			},
+			{
+				Config:   config,
+				PlanOnly: true,
+			},
+		},
+	})
+}

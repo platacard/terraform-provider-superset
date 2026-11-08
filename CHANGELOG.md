@@ -8,6 +8,7 @@ IMPROVEMENTS:
 * resource/superset_role_permissions, data-source/superset_role_permissions: Roles are looked up by name with a filtered request, and permissions are resolved with two small requests per view menu, run concurrently and cached for the run, instead of scanning the whole permission catalogue, which on large instances could not be fetched completely. Permissions are sent to Superset in the order of the configuration.
 
 BUG FIXES:
+* resource/superset_user: Reading the user no longer reorders `roles` to the order returned by Superset, which made every `terraform plan` report an update when the configured order differed.
 * resource/superset_role: A failing role lookup (for example a network error) is reported instead of being treated as "role does not exist" and followed by a creation attempt.
 
 ## 0.5.0 (2026-11-08)
