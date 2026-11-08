@@ -245,6 +245,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatabasesDataSource,       // New databases data source
 		NewDatasetsDataSource,        // New datasets data source
 		NewUsersDataSource,           // New users data source
+		NewCSSTemplateDataSource,     // CSS template looked up by name
 	}
 }
 
@@ -257,5 +258,6 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewMetaDatabaseResource,    // Meta database resource
 		NewDatasetResource,         // New dataset resource
 		NewUserResource,            // New user resource
+		NewCSSTemplateResource,     // CSS template resource
 	}
 }
