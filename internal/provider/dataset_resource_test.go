@@ -109,7 +109,7 @@ func TestAccDatasetResource(t *testing.T) {
 	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
 		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/?q=(page_size:5000)",
+	httpmock.RegisterResponder("GET", listEndpoint("/api/v1/database/"),
 		httpmock.NewStringResponder(200, mockDatabasesResponse))
 
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dataset/",
@@ -249,7 +249,7 @@ func TestAccDatasetResourceWithSQL(t *testing.T) {
 	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/csrf_token/",
 		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/?q=(page_size:5000)",
+	httpmock.RegisterResponder("GET", listEndpoint("/api/v1/database/"),
 		httpmock.NewStringResponder(200, mockDatabasesResponse))
 
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dataset/",

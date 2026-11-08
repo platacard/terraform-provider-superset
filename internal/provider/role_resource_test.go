@@ -21,7 +21,7 @@ func TestAccRoleResource(t *testing.T) {
 		httpmock.NewStringResponder(200, `{"result": "fake-csrf-token"}`))
 
 	// Mock the Superset API response for checking if role exists (for GetRoleIDByName)
-	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/security/roles?q=(page_size:5000)",
+	httpmock.RegisterResponder("GET", listEndpoint("/api/v1/security/roles/"),
 		httpmock.NewStringResponder(200, `{"result": [{"id": 1, "name": "Antifraud"}]}`))
 
 	// Mock the Superset API response for creating roles

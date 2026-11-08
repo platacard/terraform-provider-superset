@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"os"
+	"regexp"
+	"testing"
+
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
-	"os"
-	"testing"
 )
 
 const providerConfig = `
@@ -31,4 +33,10 @@ func testAccPreCheck(t *testing.T) {
 	if v := os.Getenv("SUPERSET_HOST"); v == "" {
 		t.Fatal("SUPERSET_HOST must be set for acceptance tests")
 	}
+}
+
+// listEndpoint matches a list endpoint of the fake Superset host regardless of the paging
+// and filter arguments the client sends.
+func listEndpoint(path string) string {
+	return "=~^" + regexp.QuoteMeta("http://superset-host"+path) + `\?`
 }

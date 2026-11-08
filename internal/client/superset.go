@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,8 @@ type Client struct {
 
 	mu    sync.Mutex
 	token string
+
+	permissions permissionIndex
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
@@ -270,43 +273,13 @@ func (c *Client) csrfHeaders() (map[string]string, []*http.Cookie, error) {
 	return headers, cookies, nil
 }
 
-// GetRoleIDByName retrieves the ID of a role by its name from the Superset API.
-// It sends a GET request to the Superset API to fetch all roles, and then searches for the role with the specified name.
-// If the role is found, its ID is returned. Otherwise, an error is returned.
-// The function expects a valid Superset client to be passed as the receiver (c).
-// The roleName parameter specifies the name of the role to search for.
-// The function returns the ID of the role and an error, if any.
+// GetRoleIDByName returns the id of the role with the given name.
 func (c *Client) GetRoleIDByName(roleName string) (int64, error) {
-	endpoint := "/api/v1/security/roles?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
+	id, err := c.findIDByName("/api/v1/security/roles/", roleName)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("role %s: %w", roleName, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to fetch roles from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Roles []struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-		} `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, role := range result.Roles {
-		if role.Name == roleName {
-			return role.ID, nil
-		}
-	}
-
-	return 0, fmt.Errorf("role %s not found", roleName)
+	return id, nil
 }
 
 // GetRolePermissions retrieves the permissions associated with a given role ID from Superset.
@@ -335,59 +308,6 @@ func (c *Client) GetRolePermissions(roleID int64) ([]Permission, error) {
 	return result.Permissions, nil
 }
 
-// GetPermissionViewMenuIDs retrieves the IDs of permissions and view menus
-// based on the provided permissions. It sends a GET request to the Superset
-// API to fetch the permissions resources and filters the results based on
-// the provided permissions. It returns a slice of int64 IDs that match the
-// provided permissions, or an error if the request fails or the decoding of
-// the response fails.
-//
-// Parameters:
-//   - permissions: A slice of maps containing the permission and view menu names
-//     to filter the results.
-//
-// Returns:
-// - A slice of int64 IDs that match the provided permissions.
-// - An error if the request fails or the decoding of the response fails.
-func (c *Client) GetPermissionViewMenuIDs(permissions []map[string]string) ([]int64, error) {
-	resp, err := c.DoRequest("GET", "/api/v1/security/permissions-resources/?q=(page_size:5000)", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Resources []struct {
-			ID         int64 `json:"id"`
-			Permission struct {
-				Name string `json:"name"`
-			} `json:"permission"`
-			ViewMenu struct {
-				Name string `json:"name"`
-			} `json:"view_menu"`
-		} `json:"result"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	var ids []int64
-	for _, perm := range permissions {
-		for _, res := range result.Resources {
-			if res.Permission.Name == perm["permission"] && res.ViewMenu.Name == perm["view_menu"] {
-				ids = append(ids, res.ID)
-				break
-			}
-		}
-	}
-	return ids, nil
-}
-
 // CreateRole creates a role with the specified name in the Superset application.
 // If the role already exists, it returns the existing role ID.
 // It returns the ID of the created role and any error encountered.
@@ -396,6 +316,9 @@ func (c *Client) CreateRole(name string) (int64, error) {
 	existingID, err := c.GetRoleIDByName(name)
 	if err == nil {
 		return existingID, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return 0, err
 	}
 
 	headers, cookies, err := c.csrfHeaders()
@@ -545,56 +468,6 @@ func (c *Client) DeleteRole(id int64) error {
 	return nil
 }
 
-// GetPermissionIDByNameAndView retrieves the ID of a permission by its name and view menu name.
-// It sends a GET request to the Superset API to fetch the permissions resources and searches for the resource
-// that matches the given permission name and view menu name. If a match is found, it returns the ID of the resource.
-// If no match is found, it returns an error indicating that the permission with the given name and view menu name was not found.
-//
-// Parameters:
-// - permissionName: The name of the permission to search for.
-// - viewMenuName: The name of the view menu to search for.
-//
-// Returns:
-// - int64: The ID of the permission resource if found.
-// - error: An error if the request fails or if the permission resource is not found.
-func (c *Client) GetPermissionIDByNameAndView(permissionName, viewMenuName string) (int64, error) {
-	endpoint := "/api/v1/security/permissions-resources?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to fetch permissions resources from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Resources []struct {
-			ID         int64 `json:"id"`
-			Permission struct {
-				Name string `json:"name"`
-			} `json:"permission"`
-			ViewMenu struct {
-				Name string `json:"name"`
-			} `json:"view_menu"`
-		} `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, resource := range result.Resources {
-		if resource.Permission.Name == permissionName && resource.ViewMenu.Name == viewMenuName {
-			return resource.ID, nil
-		}
-	}
-
-	return 0, fmt.Errorf("permission %s with view menu %s not found", permissionName, viewMenuName)
-}
-
 // UpdateRolePermissions updates the permissions of a role in the Superset application.
 // It takes the role ID and a slice of permission IDs as parameters.
 // The function sends a POST request to the Superset API to update the role permissions.
@@ -648,31 +521,9 @@ func (c *Client) ClearRolePermissions(roleID int64) error {
 	return nil
 }
 
-// FetchRoles fetches the roles from the Superset API.
-// It sends a GET request to the "/api/v1/security/roles?q=(page_size:5000)" endpoint
-// and returns a slice of rawRoleModel and an error.
+// FetchRoles returns every role of the Superset instance.
 func (c *Client) FetchRoles() ([]rawRoleModel, error) {
-	endpoint := "/api/v1/security/roles?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch roles from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Roles []rawRoleModel `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result.Roles, nil
+	return listInto[rawRoleModel](c, "/api/v1/security/roles/")
 }
 
 // GetDatabaseSchemasByID retrieves the database schemas by the given database ID.
@@ -748,32 +599,17 @@ func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
 		return globalDatabasesCache, nil
 	}
 
-	endpoint := "/api/v1/database/?q=(page_size:5000)"
-	fmt.Printf("DEBUG GetAllDatabases: Making API call to %s\n", endpoint)
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch databases from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Result []map[string]interface{} `json:"result"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&result)
+	databases, err := listInto[map[string]interface{}](c, "/api/v1/database/")
 	if err != nil {
 		return nil, err
 	}
 
 	// Cache the result globally
-	globalDatabasesCache = result.Result
+	globalDatabasesCache = databases
 	globalDatabasesCacheTime = time.Now()
 
-	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(result.Result))
-	return result.Result, nil
+	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(databases))
+	return databases, nil
 }
 
 // GetDatabasesInfos retrieves information about all databases.
@@ -912,28 +748,9 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 	return nil
 }
 
-// GetAllDatasets fetches all datasets from Superset.
+// GetAllDatasets returns every dataset of the Superset instance.
 func (c *Client) GetAllDatasets() ([]map[string]interface{}, error) {
-	endpoint := "/api/v1/dataset/?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch datasets from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Result []map[string]interface{} `json:"result"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result.Result, nil
+	return listInto[map[string]interface{}](c, "/api/v1/dataset/")
 }
 
 // DatasetRequest represents the request structure for creating/updating a dataset.
@@ -1405,31 +1222,9 @@ type rawUserModel struct {
 	} `json:"roles"`
 }
 
-// FetchUsers fetches the users from the Superset API.
-// It sends a GET request to the "/api/v1/security/users/?q=(page_size:5000)" endpoint
-// and returns a slice of rawUserModel and an error.
+// FetchUsers returns every user of the Superset instance.
 func (c *Client) FetchUsers() ([]rawUserModel, error) {
-	endpoint := "/api/v1/security/users/?q=(page_size:5000)"
-	resp, err := c.DoRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch users from Superset, status code: %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Users []rawUserModel `json:"result"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result.Users, nil
+	return listInto[rawUserModel](c, "/api/v1/security/users/")
 }
 
 // GetUser retrieves a user by its ID from the Superset API.
