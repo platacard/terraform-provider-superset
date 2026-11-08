@@ -3,17 +3,18 @@
 page_title: "superset_dataset Resource - superset"
 subcategory: ""
 description: |-
-  Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its count metric itself.
+  Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its count metric itself; columns and metrics take them over when set.
 ---
 
 # superset_dataset (Resource)
 
-Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself.
+Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself; `columns` and `metrics` take them over when set.
 
 ## Example Usage
 
 ```terraform
-# A table of a database. Superset detects the columns and creates the count metric itself.
+# A table of a database. Superset detects the columns and creates the count metric itself
+# unless columns and metrics take them over.
 resource "superset_dataset" "sales" {
   table_name    = "sales"
   database_name = superset_database.warehouse.connection_name
@@ -25,6 +26,15 @@ resource "superset_dataset" "sales" {
   extra = jsonencode({
     certification = { certified_by = "Data team", details = "Reviewed monthly" }
   })
+
+  # With columns set, the dataset has exactly these columns. Only the attributes that are set
+  # are written: the detected type of a column of the source is kept.
+  columns = [
+    { column_name = "id", groupby = false },
+    { column_name = "amount", verbose_name = "Amount" },
+    { column_name = "sold_at", is_dttm = true },
+    { column_name = "amount_cents", expression = "amount * 100", type = "NUMERIC" },
+  ]
 
   # With metrics set, the dataset has exactly these metrics; declare count to keep it.
   metrics = [
@@ -54,6 +64,7 @@ resource "superset_dataset" "signups_per_day" {
 
 - `always_filter_main_dttm` (Boolean) Whether the time range of a chart is always applied to the main datetime column, even when the chart filters another one. Defaults to `false`.
 - `cache_timeout` (Number) Duration in seconds for which the charts of the dataset are cached. Unset to use the timeout of the database.
+- `columns` (Attributes Set) Columns of the dataset. When unset, the columns are left to Superset, which detects them from the source. When set, the dataset has exactly these columns, and columns not listed here are deleted. Within a column, only the attributes that are set are written, so the others keep the value Superset has, such as the detected `type`; an empty string clears an attribute. (see [below for nested schema](#nestedatt--columns))
 - `default_endpoint` (String) URL Superset redirects to when the dataset is opened.
 - `description` (String) Free-text description of the dataset.
 - `extra` (String) JSON document with extra settings of the dataset, such as `certification` or `warning_markdown`.
@@ -72,6 +83,25 @@ resource "superset_dataset" "signups_per_day" {
 - `id` (Number) Numeric identifier of the dataset.
 - `perm` (String) View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.
 - `schema_perm` (String) View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.
+
+<a id="nestedatt--columns"></a>
+### Nested Schema for `columns`
+
+Required:
+
+- `column_name` (String) Name of the column, unique within the dataset.
+
+Optional:
+
+- `description` (String) Free-text description of the column.
+- `expression` (String) SQL expression of a calculated column, for example `amount * 100`.
+- `filterable` (Boolean) Whether the column can be used in a filter. Defaults to `true` in Superset.
+- `groupby` (Boolean) Whether the column can be used as a dimension. Defaults to `true` in Superset.
+- `is_dttm` (Boolean) Whether the column is a datetime column, which can be used as the time column of a chart. Superset detects it for the columns of the source.
+- `python_date_format` (String) Format of the values of a datetime column stored as text, for example `%Y-%m-%d`, or `epoch_s`.
+- `type` (String) Data type of the column, for example `NUMERIC`. Superset detects it for the columns of the source; set it for a calculated column.
+- `verbose_name` (String) Label shown instead of the name.
+
 
 <a id="nestedatt--metrics"></a>
 ### Nested Schema for `metrics`

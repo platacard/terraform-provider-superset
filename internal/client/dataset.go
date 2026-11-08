@@ -31,6 +31,9 @@ type Dataset struct {
 	// Metrics are the metrics of the dataset. A nil slice leaves the metrics as they are in
 	// Superset; a non-nil slice, even an empty one, replaces them.
 	Metrics []DatasetMetric
+	// Columns are the columns of the dataset, with the same rule: nil leaves them alone, a
+	// non-nil slice replaces them.
+	Columns []DatasetColumn
 }
 
 // DatasetMetric is a metric of a dataset, an aggregate expression over its columns.
@@ -43,6 +46,23 @@ type DatasetMetric struct {
 	D3Format    string
 	WarningText string
 	MetricType  string
+}
+
+// DatasetColumn is a column of a dataset: a column of the source, or a calculated column
+// defined by an expression. The optional fields are pointers: a nil one is not written, so
+// Superset keeps what it has, such as the type it detected; an empty value clears the field.
+// A dataset read from Superset carries every field.
+type DatasetColumn struct {
+	ID               int64
+	Name             string
+	Type             *string
+	Expression       *string
+	VerboseName      *string
+	Description      *string
+	PythonDateFormat *string
+	IsDttm           *bool
+	Groupby          *bool
+	Filterable       *bool
 }
 
 // datasetMetricPayload is a metric in an update request. An entry with an id updates the
@@ -94,6 +114,7 @@ type datasetUpdatePayload struct {
 	AlwaysFilterMainDttm bool                    `json:"always_filter_main_dttm"`
 	DefaultEndpoint      *string                 `json:"default_endpoint"`
 	Metrics              *[]datasetMetricPayload `json:"metrics,omitempty"`
+	Columns              *[]map[string]any       `json:"columns,omitempty"`
 }
 
 func newDatasetUpdatePayload(dataset Dataset) datasetUpdatePayload {
@@ -141,6 +162,44 @@ func metricPayloads(metrics []DatasetMetric, current []DatasetMetric) []datasetM
 	return payloads
 }
 
+// columnPayloads builds the columns of an update the same way, as objects that only carry the
+// fields to write: Superset keeps the fields an existing column does not carry.
+func columnPayloads(columns []DatasetColumn, current []DatasetColumn) []map[string]any {
+	ids := make(map[string]int64, len(current))
+	for _, column := range current {
+		ids[column.Name] = column.ID
+	}
+	payloads := make([]map[string]any, 0, len(columns))
+	for _, column := range columns {
+		payload := map[string]any{"column_name": column.Name}
+		if id, ok := ids[column.Name]; ok {
+			payload["id"] = id
+		}
+		for key, value := range map[string]*string{
+			"type":               column.Type,
+			"expression":         column.Expression,
+			"verbose_name":       column.VerboseName,
+			"description":        column.Description,
+			"python_date_format": column.PythonDateFormat,
+		} {
+			if value != nil {
+				payload[key] = nullIfEmpty(*value)
+			}
+		}
+		for key, value := range map[string]*bool{
+			"is_dttm":    column.IsDttm,
+			"groupby":    column.Groupby,
+			"filterable": column.Filterable,
+		} {
+			if value != nil {
+				payload[key] = *value
+			}
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads
+}
+
 // datasetResult is the dataset as the API returns it.
 type datasetResult struct {
 	Database struct {
@@ -171,6 +230,18 @@ type datasetResult struct {
 		WarningText string `json:"warning_text"`
 		MetricType  string `json:"metric_type"`
 	} `json:"metrics"`
+	Columns []struct {
+		ID               int64  `json:"id"`
+		Name             string `json:"column_name"`
+		Type             string `json:"type"`
+		Expression       string `json:"expression"`
+		VerboseName      string `json:"verbose_name"`
+		Description      string `json:"description"`
+		PythonDateFormat string `json:"python_date_format"`
+		IsDttm           bool   `json:"is_dttm"`
+		Groupby          bool   `json:"groupby"`
+		Filterable       bool   `json:"filterable"`
+	} `json:"columns"`
 }
 
 func datasetPath(id int64) string {
@@ -268,6 +339,7 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 		AlwaysFilterMainDttm: result.AlwaysFilterMainDttm,
 		DefaultEndpoint:      result.DefaultEndpoint,
 		Metrics:              make([]DatasetMetric, 0, len(result.Metrics)),
+		Columns:              make([]DatasetColumn, 0, len(result.Columns)),
 	}
 	for _, metric := range result.Metrics {
 		dataset.Metrics = append(dataset.Metrics, DatasetMetric{
@@ -281,6 +353,20 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 			MetricType:  metric.MetricType,
 		})
 	}
+	for _, column := range result.Columns {
+		dataset.Columns = append(dataset.Columns, DatasetColumn{
+			ID:               column.ID,
+			Name:             column.Name,
+			Type:             &column.Type,
+			Expression:       &column.Expression,
+			VerboseName:      &column.VerboseName,
+			Description:      &column.Description,
+			PythonDateFormat: &column.PythonDateFormat,
+			IsDttm:           &column.IsDttm,
+			Groupby:          &column.Groupby,
+			Filterable:       &column.Filterable,
+		})
+	}
 	if dataset.DatabaseName == "" && dataset.DatabaseID != 0 {
 		name, err := c.GetDatabaseNameByID(dataset.DatabaseID)
 		if err != nil {
@@ -291,18 +377,24 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 	return dataset, nil
 }
 
-// UpdateDataset replaces the settings of a dataset. The metrics are replaced as well when the
-// dataset carries a non-nil list of them: the ones that exist keep their id, new ones are
-// created and the ones that are not listed are deleted. The columns are left as they are.
+// UpdateDataset replaces the settings of a dataset. The metrics and the columns are replaced as
+// well when the dataset carries a non-nil list of them: the ones that exist keep their id, new
+// ones are created and the ones that are not listed are deleted.
 func (c *Client) UpdateDataset(id int64, dataset Dataset) error {
 	payload := newDatasetUpdatePayload(dataset)
-	if dataset.Metrics != nil {
+	if dataset.Metrics != nil || dataset.Columns != nil {
 		current, err := c.GetDataset(id)
 		if err != nil {
 			return err
 		}
-		metrics := metricPayloads(dataset.Metrics, current.Metrics)
-		payload.Metrics = &metrics
+		if dataset.Metrics != nil {
+			metrics := metricPayloads(dataset.Metrics, current.Metrics)
+			payload.Metrics = &metrics
+		}
+		if dataset.Columns != nil {
+			columns := columnPayloads(dataset.Columns, current.Columns)
+			payload.Columns = &columns
+		}
 	}
 
 	headers, cookies, err := c.csrfHeaders()
@@ -315,6 +407,21 @@ func (c *Client) UpdateDataset(id int64, dataset Dataset) error {
 		return err
 	}
 	return decodeResponse(resp, nil, "update dataset")
+}
+
+// RefreshDataset syncs the columns of a dataset from its source, as the dataset editor does.
+// A dataset that no longer exists is reported as ErrNotFound.
+func (c *Client) RefreshDataset(id int64) error {
+	headers, cookies, err := c.csrfHeaders()
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.DoRequestWithHeadersAndCookies(http.MethodPut, datasetPath(id)+"/refresh", nil, headers, cookies)
+	if err != nil {
+		return err
+	}
+	return decodeResponse(resp, nil, "refresh dataset")
 }
 
 // DeleteDataset deletes a dataset; a dataset that no longer exists is reported as ErrNotFound.

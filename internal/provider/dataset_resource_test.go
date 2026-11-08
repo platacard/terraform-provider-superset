@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,17 +21,64 @@ import (
 // fakeDataset serves the dataset endpoints of the fake Superset host for one dataset with id
 // 123. Like Superset, the create request only stores the identifying fields and an update merges
 // the fields it carries into the dataset; the owners default to the current user and the main
-// datetime column is detected when none is set.
+// datetime column is detected when none is set. The columns of the source are detected when
+// the dataset is created and when it is refreshed.
 type fakeDataset struct {
-	mu      sync.Mutex
-	dataset map[string]any
-	metrics []map[string]any
-	nextID  float64
-	deleted bool
-	updates int
+	mu           sync.Mutex
+	dataset      map[string]any
+	metrics      []map[string]any
+	columns      []map[string]any
+	nextID       float64
+	nextColumnID float64
+	// sentColumns are the columns of the last update, nil when it did not carry any.
+	sentColumns []any
+	deleted     bool
+	updates     int
+	refreshes   int
 	// legacy makes the create endpoint reject template parameters, as Superset 3.1 does.
 	legacy  bool
 	creates int
+}
+
+// fakeSourceColumns are the columns Superset detects in the source table of the fake dataset.
+func fakeSourceColumns() []map[string]any {
+	return []map[string]any{
+		{"column_name": "id", "type": "INTEGER", "is_dttm": false, "groupby": true, "filterable": true},
+		{"column_name": "amount", "type": "NUMERIC(10, 2)", "is_dttm": false, "groupby": true, "filterable": true},
+		{"column_name": "day", "type": "DATE", "is_dttm": true, "groupby": true, "filterable": true},
+	}
+}
+
+// mergeEntries applies the metrics or columns of an update the way Superset does: an entry with
+// an id updates the item and keeps the fields it does not carry, one without an id creates an
+// item, and the items that are not listed are deleted. An unknown id is reported as false.
+func mergeEntries(entries []any, current []map[string]any, nextID *float64) ([]map[string]any, bool) {
+	existing := map[float64]map[string]any{}
+	for _, item := range current {
+		id, _ := item["id"].(float64)
+		existing[id] = item
+	}
+	var kept []map[string]any
+	for _, entry := range entries {
+		fields, _ := entry.(map[string]any)
+		item := map[string]any{}
+		if id, ok := fields["id"].(float64); ok {
+			if _, known := existing[id]; !known {
+				return nil, false
+			}
+			for k, v := range existing[id] {
+				item[k] = v
+			}
+		} else {
+			item["id"] = *nextID
+			*nextID++
+		}
+		for k, v := range fields {
+			item[k] = v
+		}
+		kept = append(kept, item)
+	}
+	return kept, true
 }
 
 const fakeDatabases = `{"count": 2, "result": [
@@ -61,9 +109,11 @@ func (f *fakeDataset) serve() {
 				return httpmock.NewStringResponse(400, `{"message": {"template_params": ["Unknown field."]}}`), nil
 			}
 			f.dataset, f.deleted = payload, false
-			// Superset creates the count metric with every dataset.
+			// Superset creates the count metric with every dataset and detects the columns.
 			f.metrics = []map[string]any{{"id": float64(1), "metric_name": "count", "expression": "COUNT(*)", "verbose_name": "COUNT(*)", "metric_type": "count"}}
 			f.nextID = 2
+			f.columns, f.nextColumnID = nil, 1
+			f.refresh()
 			return httpmock.NewStringResponse(201, `{"id": 123}`), nil
 		})
 	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/dataset/123",
@@ -72,40 +122,25 @@ func (f *fakeDataset) serve() {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			for key, value := range payload {
-				if key == "metrics" {
+				if key == "metrics" || key == "columns" {
 					continue
 				}
 				f.dataset[key] = value
 			}
 			if entries, ok := payload["metrics"].([]any); ok {
-				// Like Superset: an entry with an id updates the metric and keeps the fields it
-				// does not carry, one without an id creates a metric, and the rest are deleted.
-				existing := map[float64]map[string]any{}
-				for _, metric := range f.metrics {
-					id, _ := metric["id"].(float64)
-					existing[id] = metric
+				metrics, ok := mergeEntries(entries, f.metrics, &f.nextID)
+				if !ok {
+					return httpmock.NewStringResponse(422, `{"message": {"metrics": ["One or more metrics do not exist"]}}`), nil
 				}
-				var kept []map[string]any
-				for _, entry := range entries {
-					fields, _ := entry.(map[string]any)
-					metric := map[string]any{}
-					if id, ok := fields["id"].(float64); ok {
-						if _, known := existing[id]; !known {
-							return httpmock.NewStringResponse(422, `{"message": {"metrics": ["One or more metrics do not exist"]}}`), nil
-						}
-						for k, v := range existing[id] {
-							metric[k] = v
-						}
-					} else {
-						metric["id"] = f.nextID
-						f.nextID++
-					}
-					for k, v := range fields {
-						metric[k] = v
-					}
-					kept = append(kept, metric)
+				f.metrics = metrics
+			}
+			f.sentColumns = nil
+			if entries, ok := payload["columns"].([]any); ok {
+				columns, ok := mergeEntries(entries, f.columns, &f.nextColumnID)
+				if !ok {
+					return httpmock.NewStringResponse(422, `{"message": {"columns": ["One or more columns do not exist"]}}`), nil
 				}
-				f.metrics = kept
+				f.columns, f.sentColumns = columns, entries
 			}
 			f.updates++
 			return httpmock.NewStringResponse(200, `{"id": 123}`), nil
@@ -143,6 +178,7 @@ func (f *fakeDataset) serve() {
 				"always_filter_main_dttm": f.dataset["always_filter_main_dttm"],
 				"default_endpoint":        f.dataset["default_endpoint"],
 				"metrics":                 f.metrics,
+				"columns":                 f.columns,
 			}
 			if v, ok := f.dataset["main_dttm_col"]; ok && v != nil {
 				result["main_dttm_col"] = v
@@ -151,6 +187,17 @@ func (f *fakeDataset) serve() {
 				result["filter_select_enabled"] = v
 			}
 			return httpmock.NewJsonResponse(200, map[string]any{"id": 123, "result": result})
+		})
+	httpmock.RegisterResponder("PUT", "http://superset-host/api/v1/dataset/123/refresh",
+		func(req *http.Request) (*http.Response, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.deleted || f.dataset == nil {
+				return httpmock.NewStringResponse(404, `{"message": "Not found"}`), nil
+			}
+			f.refreshes++
+			f.refresh()
+			return httpmock.NewStringResponse(200, `{"message": "OK"}`), nil
 		})
 	httpmock.RegisterResponder("DELETE", "http://superset-host/api/v1/dataset/123",
 		func(req *http.Request) (*http.Response, error) {
@@ -161,10 +208,61 @@ func (f *fakeDataset) serve() {
 		})
 }
 
+// refresh syncs the columns from the source the way Superset does: the columns of the source
+// are added when missing and get their detected type back, the ones that are neither in the
+// source nor calculated are removed, and the count metric is recreated when it is missing.
+func (f *fakeDataset) refresh() {
+	var columns []map[string]any
+	for _, source := range fakeSourceColumns() {
+		column := map[string]any{"id": f.nextColumnID}
+		for _, existing := range f.columns {
+			if existing["column_name"] == source["column_name"] {
+				column = existing
+			}
+		}
+		if column["id"] == f.nextColumnID {
+			f.nextColumnID++
+		}
+		for k, v := range source {
+			if _, kept := column[k]; !kept || k == "type" {
+				column[k] = v
+			}
+		}
+		column["expression"] = ""
+		columns = append(columns, column)
+	}
+	for _, existing := range f.columns {
+		if expression, _ := existing["expression"].(string); expression != "" {
+			columns = append(columns, existing)
+		}
+	}
+	f.columns = columns
+	if f.storedMetric("count") == nil {
+		f.metrics = append(f.metrics, map[string]any{"id": f.nextID, "metric_name": "count", "expression": "COUNT(*)", "verbose_name": "COUNT(*)", "metric_type": "count"})
+		f.nextID++
+	}
+}
+
+// column returns the stored column with the given name, or nil.
+func (f *fakeDataset) column(name string) map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, column := range f.columns {
+		if column["column_name"] == name {
+			return column
+		}
+	}
+	return nil
+}
+
 // metric returns the stored metric with the given name, or nil.
 func (f *fakeDataset) metric(name string) map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.storedMetric(name)
+}
+
+func (f *fakeDataset) storedMetric(name string) map[string]any {
 	for _, metric := range f.metrics {
 		if metric["metric_name"] == name {
 			return metric
@@ -526,6 +624,187 @@ resource "superset_dataset" "test" {
 			},
 			{
 				// Dropping the metrics attribute leaves the metrics alone.
+				Config:   physicalDataset,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// datasetColumn returns the state attributes of the column of the dataset with the given name,
+// keyed by attribute, so a test can tell an attribute that is null from one that is set.
+func datasetColumn(s *terraform.State, name string) (map[string]string, error) {
+	rs, ok := s.RootModule().Resources["superset_dataset.test"]
+	if !ok {
+		return nil, errors.New("superset_dataset.test is not in the state")
+	}
+	prefix := regexp.MustCompile(`^columns\.(\d+)\.column_name$`)
+	for key, value := range rs.Primary.Attributes {
+		match := prefix.FindStringSubmatch(key)
+		if match == nil || value != name {
+			continue
+		}
+		attributes := map[string]string{}
+		for k, v := range rs.Primary.Attributes {
+			if rest, found := strings.CutPrefix(k, "columns."+match[1]+"."); found && rest != "%" {
+				attributes[rest] = v
+			}
+		}
+		return attributes, nil
+	}
+	return nil, fmt.Errorf("column %q is not in the state", name)
+}
+
+// checkDatasetColumn verifies the attributes of a column in the state: the expected attributes
+// must have the given values and the others must be null.
+func checkDatasetColumn(name string, want map[string]string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		got, err := datasetColumn(s, name)
+		if err != nil {
+			return err
+		}
+		want["column_name"] = name
+		for key, value := range want {
+			if got[key] != value {
+				return fmt.Errorf("column %q: %s is %q, want %q", name, key, got[key], value)
+			}
+		}
+		for key, value := range got {
+			if _, expected := want[key]; !expected {
+				return fmt.Errorf("column %q: %s must be null, got %q", name, key, value)
+			}
+		}
+		return nil
+	}
+}
+
+const datasetWithColumns = providerConfig + `
+resource "superset_dataset" "test" {
+  table_name    = "sales"
+  database_name = "PostgreSQL Database"
+  schema        = "public"
+  columns = [
+    { column_name = "id" },
+    { column_name = "amount", verbose_name = "Amount", groupby = false },
+    { column_name = "amount_cents", expression = "amount * 100", type = "NUMERIC" },
+  ]
+}
+`
+
+func TestAccDatasetResourceColumns(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	fake := &fakeDataset{}
+	fake.serve()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Without columns, the detected ones are recorded with all their attributes and not sent.
+				Config: physicalDataset,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "columns.#", "3"),
+					checkDatasetColumn("day", map[string]string{"type": "DATE", "is_dttm": "true", "groupby": "true", "filterable": "true"}),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if fake.sentColumns != nil {
+							return errors.New("the columns must not be sent when they are not configured")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// The configured columns replace the detected ones; only the set attributes are written.
+				Config: datasetWithColumns,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "columns.#", "3"),
+					checkDatasetColumn("id", map[string]string{}),
+					checkDatasetColumn("amount", map[string]string{"verbose_name": "Amount", "groupby": "false"}),
+					checkDatasetColumn("amount_cents", map[string]string{"expression": "amount * 100", "type": "NUMERIC"}),
+					func(*terraform.State) error {
+						if fake.column("day") != nil {
+							return errors.New("the day column must be deleted")
+						}
+						if id := fake.column("id"); id["id"] != float64(1) || id["type"] != "INTEGER" {
+							return fmt.Errorf("the id column must keep its id and type, got %v", id)
+						}
+						if amount := fake.column("amount"); amount["id"] != float64(2) || amount["verbose_name"] != "Amount" || amount["groupby"] != false || amount["filterable"] != true {
+							return fmt.Errorf("unexpected amount column: %v", amount)
+						}
+						if cents := fake.column("amount_cents"); cents["id"] != float64(4) || cents["type"] != "NUMERIC" {
+							return fmt.Errorf("unexpected amount_cents column: %v", cents)
+						}
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						for _, entry := range fake.sentColumns {
+							fields, _ := entry.(map[string]any)
+							if fields["column_name"] == "id" && len(fields) != 2 {
+								return fmt.Errorf("only the set attributes must be sent, got %v", fields)
+							}
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// An import records every attribute of the columns.
+				ResourceName:            "superset_dataset.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"columns"},
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					attributes := states[0].Attributes
+					if attributes["columns.#"] != "3" {
+						return fmt.Errorf("unexpected columns after import: %v", attributes)
+					}
+					for key, value := range attributes {
+						if strings.HasSuffix(key, ".column_name") && value == "id" {
+							if attributes[strings.TrimSuffix(key, "column_name")+"type"] != "INTEGER" {
+								return errors.New("the detected type must be recorded after an import")
+							}
+						}
+					}
+					return nil
+				},
+			},
+			{
+				// An empty string clears an attribute, an unset one keeps what Superset has.
+				Config: providerConfig + `
+resource "superset_dataset" "test" {
+  table_name    = "sales"
+  database_name = "PostgreSQL Database"
+  schema        = "public"
+  columns = [
+    { column_name = "id" },
+    { column_name = "amount", verbose_name = "" },
+    { column_name = "day", is_dttm = true, python_date_format = "%Y-%m-%d" },
+  ]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "columns.#", "3"),
+					checkDatasetColumn("amount", map[string]string{"verbose_name": ""}),
+					checkDatasetColumn("day", map[string]string{"is_dttm": "true", "python_date_format": "%Y-%m-%d"}),
+					func(*terraform.State) error {
+						if amount := fake.column("amount"); amount["verbose_name"] != nil || amount["groupby"] != false {
+							return fmt.Errorf("the label must be cleared and the unset attributes kept, got %v", amount)
+						}
+						if day := fake.column("day"); day["id"] != float64(5) || day["is_dttm"] != true || day["python_date_format"] != "%Y-%m-%d" {
+							return fmt.Errorf("unexpected day column: %v", day)
+						}
+						if fake.column("amount_cents") != nil {
+							return errors.New("the amount_cents column must be deleted")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// Dropping the attribute leaves the columns as they are.
 				Config:   physicalDataset,
 				PlanOnly: true,
 			},

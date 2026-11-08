@@ -59,6 +59,7 @@ type datasetResourceModel struct {
 	AlwaysFilterMainDttm types.Bool   `tfsdk:"always_filter_main_dttm"`
 	DefaultEndpoint      types.String `tfsdk:"default_endpoint"`
 	Metrics              types.Set    `tfsdk:"metrics"`
+	Columns              types.Set    `tfsdk:"columns"`
 	Perm                 types.String `tfsdk:"perm"`
 	SchemaPerm           types.String `tfsdk:"schema_perm"`
 }
@@ -84,6 +85,31 @@ var datasetMetricAttributeTypes = map[string]attr.Type{
 	"metric_type":  types.StringType,
 }
 
+// datasetColumnModel maps one element of the columns attribute.
+type datasetColumnModel struct {
+	Name             types.String `tfsdk:"column_name"`
+	Type             types.String `tfsdk:"type"`
+	Expression       types.String `tfsdk:"expression"`
+	VerboseName      types.String `tfsdk:"verbose_name"`
+	Description      types.String `tfsdk:"description"`
+	PythonDateFormat types.String `tfsdk:"python_date_format"`
+	IsDttm           types.Bool   `tfsdk:"is_dttm"`
+	Groupby          types.Bool   `tfsdk:"groupby"`
+	Filterable       types.Bool   `tfsdk:"filterable"`
+}
+
+var datasetColumnAttributeTypes = map[string]attr.Type{
+	"column_name":        types.StringType,
+	"type":               types.StringType,
+	"expression":         types.StringType,
+	"verbose_name":       types.StringType,
+	"description":        types.StringType,
+	"python_date_format": types.StringType,
+	"is_dttm":            types.BoolType,
+	"groupby":            types.BoolType,
+	"filterable":         types.BoolType,
+}
+
 // Metadata returns the resource type name.
 func (r *datasetResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_dataset"
@@ -92,7 +118,7 @@ func (r *datasetResource) Metadata(_ context.Context, req resource.MetadataReque
 // Schema defines the schema for the resource.
 func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself.",
+		Description: "Manages a dataset: a table of a database, or a virtual dataset defined by a SQL query. Superset detects the columns of the dataset and creates its `count` metric itself; `columns` and `metrics` take them over when set.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Description: "Numeric identifier of the dataset.",
@@ -221,6 +247,54 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					},
 				},
 			},
+			"columns": schema.SetNestedAttribute{
+				Description: "Columns of the dataset. When unset, the columns are left to Superset, which detects them from the source. When set, the dataset has exactly these columns, and columns not listed here are deleted. Within a column, only the attributes that are set are written, so the others keep the value Superset has, such as the detected `type`; an empty string clears an attribute.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"column_name": schema.StringAttribute{
+							Description: "Name of the column, unique within the dataset.",
+							Required:    true,
+						},
+						"type": schema.StringAttribute{
+							Description: "Data type of the column, for example `NUMERIC`. Superset detects it for the columns of the source; set it for a calculated column.",
+							Optional:    true,
+						},
+						"expression": schema.StringAttribute{
+							Description: "SQL expression of a calculated column, for example `amount * 100`.",
+							Optional:    true,
+						},
+						"verbose_name": schema.StringAttribute{
+							Description: "Label shown instead of the name.",
+							Optional:    true,
+						},
+						"description": schema.StringAttribute{
+							Description: "Free-text description of the column.",
+							Optional:    true,
+						},
+						"python_date_format": schema.StringAttribute{
+							Description: "Format of the values of a datetime column stored as text, for example `%Y-%m-%d`, or `epoch_s`.",
+							Optional:    true,
+						},
+						"is_dttm": schema.BoolAttribute{
+							Description: "Whether the column is a datetime column, which can be used as the time column of a chart. Superset detects it for the columns of the source.",
+							Optional:    true,
+						},
+						"groupby": schema.BoolAttribute{
+							Description: "Whether the column can be used as a dimension. Defaults to `true` in Superset.",
+							Optional:    true,
+						},
+						"filterable": schema.BoolAttribute{
+							Description: "Whether the column can be used in a filter. Defaults to `true` in Superset.",
+							Optional:    true,
+						},
+					},
+				},
+			},
 			"perm": schema.StringAttribute{
 				Description: "View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.",
 				Computed:    true,
@@ -275,7 +349,7 @@ func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	r.readInto(ctx, id, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Creation")
+	r.readInto(ctx, id, plan.Columns, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Creation")
 }
 
 // Read refreshes the Terraform state with the dataset as it is in Superset.
@@ -297,7 +371,7 @@ func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	model, diags := datasetModel(ctx, dataset)
+	model, diags := datasetModel(ctx, dataset, state.Columns)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -325,7 +399,7 @@ func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	r.readInto(ctx, state.ID.ValueInt64(), &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Update")
+	r.readInto(ctx, state.ID.ValueInt64(), plan.Columns, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Update")
 }
 
 // Delete deletes the dataset; a dataset that is already gone is not an error.
@@ -373,14 +447,15 @@ func (r *datasetResource) Configure(_ context.Context, req resource.ConfigureReq
 
 // readInto fetches the dataset and stores it in the state after a create or an update, so the
 // state carries the values Superset computed, such as the owners or the main datetime column.
-func (r *datasetResource) readInto(ctx context.Context, id int64, state stateSetter, diags *diag.Diagnostics, summary string) {
+// The planned columns tell which of their attributes the configuration sets.
+func (r *datasetResource) readInto(ctx context.Context, id int64, columns types.Set, state stateSetter, diags *diag.Diagnostics, summary string) {
 	dataset, err := r.client.GetDataset(id)
 	if err != nil {
 		diags.AddError(summary, err.Error())
 		return
 	}
 
-	model, d := datasetModel(ctx, dataset)
+	model, d := datasetModel(ctx, dataset, columns)
 	diags.Append(d...)
 	if diags.HasError() {
 		return
@@ -389,7 +464,7 @@ func (r *datasetResource) readInto(ctx context.Context, id int64, state stateSet
 }
 
 // datasetFromModel builds the dataset of the plan, looking the database up by its name. The
-// metrics are only part of it when the configuration sets them.
+// metrics and the columns are only part of it when the configuration sets them.
 func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel, config tfsdk.Config) (client.Dataset, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	databaseID, err := r.client.GetDatabaseIDByName(model.DatabaseName.ValueString())
@@ -436,11 +511,33 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 			})
 		}
 	}
+
+	diags.Append(config.GetAttribute(ctx, path.Root("columns"), &configured)...)
+	if !configured.IsNull() && !model.Columns.IsUnknown() {
+		var columns []datasetColumnModel
+		diags.Append(model.Columns.ElementsAs(ctx, &columns, false)...)
+		dataset.Columns = make([]client.DatasetColumn, 0, len(columns))
+		for _, column := range columns {
+			dataset.Columns = append(dataset.Columns, client.DatasetColumn{
+				Name:             column.Name.ValueString(),
+				Type:             column.Type.ValueStringPointer(),
+				Expression:       column.Expression.ValueStringPointer(),
+				VerboseName:      column.VerboseName.ValueStringPointer(),
+				Description:      column.Description.ValueStringPointer(),
+				PythonDateFormat: column.PythonDateFormat.ValueStringPointer(),
+				IsDttm:           column.IsDttm.ValueBoolPointer(),
+				Groupby:          column.Groupby.ValueBoolPointer(),
+				Filterable:       column.Filterable.ValueBoolPointer(),
+			})
+		}
+	}
 	return dataset, diags
 }
 
-// datasetModel maps a dataset to the state, with the view menus of its permissions.
-func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResourceModel, diag.Diagnostics) {
+// datasetModel maps a dataset to the state, with the view menus of its permissions. The prior
+// columns, from the plan or the state, tell which attributes of a column the configuration
+// sets: the others stay null, so the values Superset keeps do not show up as changes.
+func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns types.Set) (datasetResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
 	metrics := make([]datasetMetricModel, 0, len(dataset.Metrics))
 	for _, metric := range dataset.Metrics {
@@ -455,6 +552,8 @@ func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResource
 		})
 	}
 	metricsValue, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetMetricAttributeTypes}, metrics)
+	diags.Append(d...)
+	columnsValue, d := datasetColumnsValue(ctx, dataset.Columns, priorColumns)
 	diags.Append(d...)
 	model := datasetResourceModel{
 		ID:                   types.Int64Value(dataset.ID),
@@ -474,9 +573,70 @@ func datasetModel(ctx context.Context, dataset *client.Dataset) (datasetResource
 		AlwaysFilterMainDttm: types.BoolValue(dataset.AlwaysFilterMainDttm),
 		DefaultEndpoint:      optionalString(dataset.DefaultEndpoint),
 		Metrics:              metricsValue,
+		Columns:              columnsValue,
 	}
 	setDatasetPermissions(&model)
 	return model, diags
+}
+
+// datasetColumnsValue maps the columns of a dataset to the state. A column that the prior
+// columns know carries only the attributes they set; the other columns, and all of them when
+// the prior columns are unknown, as after an import, carry every attribute.
+func datasetColumnsValue(ctx context.Context, columns []client.DatasetColumn, prior types.Set) (types.Set, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	configured := map[string]datasetColumnModel{}
+	if !prior.IsNull() && !prior.IsUnknown() {
+		var elements []datasetColumnModel
+		diags.Append(prior.ElementsAs(ctx, &elements, false)...)
+		for _, element := range elements {
+			configured[element.Name.ValueString()] = element
+		}
+	}
+
+	models := make([]datasetColumnModel, 0, len(columns))
+	for _, column := range columns {
+		model := datasetColumnModel{
+			Name:             types.StringValue(column.Name),
+			Type:             optionalString(*column.Type),
+			Expression:       optionalString(*column.Expression),
+			VerboseName:      optionalString(*column.VerboseName),
+			Description:      optionalString(*column.Description),
+			PythonDateFormat: optionalString(*column.PythonDateFormat),
+			IsDttm:           types.BoolValue(*column.IsDttm),
+			Groupby:          types.BoolValue(*column.Groupby),
+			Filterable:       types.BoolValue(*column.Filterable),
+		}
+		if element, ok := configured[column.Name]; ok {
+			model.Type = configuredString(element.Type, *column.Type)
+			model.Expression = configuredString(element.Expression, *column.Expression)
+			model.VerboseName = configuredString(element.VerboseName, *column.VerboseName)
+			model.Description = configuredString(element.Description, *column.Description)
+			model.PythonDateFormat = configuredString(element.PythonDateFormat, *column.PythonDateFormat)
+			model.IsDttm = configuredBool(element.IsDttm, *column.IsDttm)
+			model.Groupby = configuredBool(element.Groupby, *column.Groupby)
+			model.Filterable = configuredBool(element.Filterable, *column.Filterable)
+		}
+		models = append(models, model)
+	}
+	value, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetColumnAttributeTypes}, models)
+	diags.Append(d...)
+	return value, diags
+}
+
+// configuredString returns the value Superset has when the configuration sets the attribute,
+// and null when it does not.
+func configuredString(configured types.String, value string) types.String {
+	if configured.IsNull() {
+		return types.StringNull()
+	}
+	return types.StringValue(value)
+}
+
+func configuredBool(configured types.Bool, value bool) types.Bool {
+	if configured.IsNull() {
+		return types.BoolNull()
+	}
+	return types.BoolValue(value)
 }
 
 // setDatasetPermissions derives the view menus of the dataset permissions the way Superset names
