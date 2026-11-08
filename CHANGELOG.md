@@ -1,6 +1,7 @@
 ## 0.7.0 (Unreleased)
 
 FEATURES:
+* **New Resource**: `superset_report` - Manage the alerts and reports of the Alerts & Reports page: a chart or a dashboard sent to email or Slack recipients on a schedule, or when a SQL query meets a condition.
 * **New Resource**: `superset_dataset_refresh` - Sync the columns of a dataset from its source, as the dataset editor does, when the resource is created and whenever its `triggers` change.
 
 IMPROVEMENTS:
