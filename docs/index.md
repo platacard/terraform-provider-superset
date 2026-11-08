@@ -74,6 +74,12 @@ Some resources depend on feature flags of the Superset instance (`FEATURE_FLAGS`
   another dataset, chart or dashboard has the same numeric id, which is common, because the relations of its own `owner:` and
   `type:` tags are matched by id only. Keep the flag off on Superset 3.1.
 
+## Superset 6 only
+
+`superset_theme` (and the `theme_id` of a `superset_dashboard`), `superset_group` and `superset_database_permissions_sync`
+use endpoints that older versions of Superset do not have; on those, the error says so. The group endpoints belong to the
+Flask-AppBuilder security API and need `FAB_ADD_SECURITY_API = True` as well.
+
 ## Declaring the provider where Superset is not available
 
 Terraform configures every provider declared in a configuration, even if it manages no resources.

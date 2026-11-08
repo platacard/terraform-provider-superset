@@ -26,6 +26,10 @@ type Dashboard struct {
 	// Tags are the names of the tags people attached to the object; the owner, type and
 	// favorite relations Superset keeps as tags are left out.
 	Tags []string
+	// ThemeID is the theme the dashboard applies, on Superset 6. It is only sent when set, or
+	// as null when ClearTheme is set, since older versions do not know the field.
+	ThemeID    *int64
+	ClearTheme bool
 }
 
 // dashboardPayload is the body of the create and update requests. The create endpoint rejects a
@@ -44,10 +48,28 @@ type dashboardPayload struct {
 	CertificationDetails *string `json:"certification_details"`
 	Owners               []int64 `json:"owners,omitempty"`
 	Roles                []int64 `json:"roles"`
+	ThemeID              *int64  `json:"theme_id,omitempty"`
+	clearTheme           bool
+}
+
+// MarshalJSON adds a null theme to the payload when the theme is cleared, which omitempty
+// could not express.
+func (p dashboardPayload) MarshalJSON() ([]byte, error) {
+	type plain dashboardPayload
+	if !p.clearTheme {
+		return marshal(plain(p))
+	}
+	encoded, err := marshal(plain(p))
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded[:len(encoded)-1], []byte(`,"theme_id":null}`)...), nil
 }
 
 func newDashboardPayload(dashboard Dashboard, metadata string) dashboardPayload {
 	return dashboardPayload{
+		ThemeID:              dashboard.ThemeID,
+		clearTheme:           dashboard.ClearTheme && dashboard.ThemeID == nil,
 		Title:                dashboard.Title,
 		Slug:                 nullIfEmpty(dashboard.Slug),
 		CSS:                  dashboard.CSS,
@@ -104,6 +126,9 @@ type dashboardResult struct {
 	Owners               []namedItem  `json:"owners"`
 	Roles                []namedItem  `json:"roles"`
 	Tags                 []tagSummary `json:"tags"`
+	Theme                *struct {
+		ID int64 `json:"id"`
+	} `json:"theme"`
 }
 
 func dashboardPath(id int64) string {
@@ -167,6 +192,9 @@ func (c *Client) GetDashboard(id int64) (*Dashboard, error) {
 		Owners:               ids(body.Result.Owners),
 		Roles:                ids(body.Result.Roles),
 		Tags:                 customTagNames(body.Result.Tags),
+	}
+	if body.Result.Theme != nil {
+		dashboard.ThemeID = &body.Result.Theme.ID
 	}
 	return dashboard, nil
 }
