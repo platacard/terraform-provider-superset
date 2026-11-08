@@ -1,7 +1,11 @@
-## 0.7.0 (Unreleased)
+## 1.0.0 (Unreleased)
 
 FEATURES:
 * **New Resource**: `superset_report` - Manage the alerts and reports of the Alerts & Reports page: a chart or a dashboard sent to email or Slack recipients on a schedule, or when a SQL query meets a condition.
+* **New Resource**: `superset_theme` - Manage the themes of Superset 6, including the default and the dark theme of the instance.
+* **New Resource**: `superset_group` - Manage the groups of users of Superset 6, with their roles and members.
+* **New Resource**: `superset_database_permissions_sync` - Make Superset 6 refresh the catalog and schema permissions of a database connection.
+* resource/superset_dashboard: New `theme_id` attribute, the theme a dashboard applies on Superset 6.
 * **New Resource**: `superset_assets_import` - Import a whole export bundle (databases, datasets, charts, dashboards and saved queries) at once through the assets endpoint, and again whenever its files change.
 * **New Data Source**: `superset_database_schemas`, `superset_database_tables`, `superset_database_table` - Discover what Superset sees in a database connection: its schemas, the tables and views of a schema, and the columns of a table.
 * **New Resource**: `superset_tag` - Manage tags, with the `TAGGING_SYSTEM` feature flag.

@@ -290,26 +290,29 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 // Resources defines the resources implemented in the provider.
 func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewRoleResource,               // New resource
-		NewRolePermissionsResource,    // New resource
-		NewDatabaseResource,           // New resource
-		NewMetaDatabaseResource,       // Meta database resource
-		NewDatasetResource,            // New dataset resource
-		NewDatasetRefreshResource,     // Dataset column sync
-		NewUserResource,               // New user resource
-		NewCSSTemplateResource,        // CSS template resource
-		NewRowLevelSecurityResource,   // Row level security rule
-		NewSavedQueryResource,         // Saved query
-		NewAnnotationLayerResource,    // Annotation layer
-		NewAnnotationResource,         // Annotation of a layer
-		NewTagResource,                // Tag
-		NewReportResource,             // Report or alert
-		NewChartResource,              // Chart
-		NewDashboardResource,          // Dashboard
-		NewDashboardEmbeddingResource, // Dashboard embedding
-		NewDashboardImportResource,    // Dashboard import
-		NewChartImportResource,        // Chart import
-		NewDatasetImportResource,      // Dataset import
-		NewAssetsImportResource,       // Assets import
+		NewRoleResource,                    // New resource
+		NewRolePermissionsResource,         // New resource
+		NewDatabaseResource,                // New resource
+		NewMetaDatabaseResource,            // Meta database resource
+		NewDatasetResource,                 // New dataset resource
+		NewDatasetRefreshResource,          // Dataset column sync
+		NewUserResource,                    // New user resource
+		NewCSSTemplateResource,             // CSS template resource
+		NewRowLevelSecurityResource,        // Row level security rule
+		NewSavedQueryResource,              // Saved query
+		NewAnnotationLayerResource,         // Annotation layer
+		NewAnnotationResource,              // Annotation of a layer
+		NewTagResource,                     // Tag
+		NewReportResource,                  // Report or alert
+		NewChartResource,                   // Chart
+		NewDashboardResource,               // Dashboard
+		NewDashboardEmbeddingResource,      // Dashboard embedding
+		NewDashboardImportResource,         // Dashboard import
+		NewChartImportResource,             // Chart import
+		NewDatasetImportResource,           // Dataset import
+		NewAssetsImportResource,            // Assets import
+		NewThemeResource,                   // Theme (Superset 6)
+		NewGroupResource,                   // Group of users (Superset 6)
+		NewDatabasePermissionsSyncResource, // Permission sync of a database (Superset 6)
 	}
 }

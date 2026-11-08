@@ -14,6 +14,19 @@ import (
 const securityAPIHint = "Superset does not expose this endpoint: the users, roles and permissions endpoints belong to the " +
 	"Flask-AppBuilder security API, which Superset only enables with FAB_ADD_SECURITY_API = True in superset_config.py."
 
+// supersetSixHint explains the 404 of the endpoints that only recent versions of Superset have.
+const supersetSixHint = "This endpoint does not exist on this version of Superset: themes, groups and the permission sync " +
+	"of a database need Superset 6."
+
+// supersetSixEndpoint reports whether the request went to an endpoint of Superset 6.
+func supersetSixEndpoint(resp *http.Response) bool {
+	if resp.Request == nil || resp.Request.URL == nil {
+		return false
+	}
+	path := resp.Request.URL.Path
+	return strings.HasPrefix(path, "/api/v1/theme/") || strings.HasPrefix(path, "/api/v1/security/groups/") || strings.HasSuffix(path, "/sync_permissions/")
+}
+
 // missingEndpoint reports whether the response is the 404 of a route that does not exist, as
 // opposed to the 404 of an object that does not exist.
 func missingEndpoint(resp *http.Response, body []byte) bool {
@@ -38,7 +51,10 @@ func securityEndpoint(resp *http.Response) bool {
 // hint when a security endpoint does not exist on the instance.
 func responseError(action string, resp *http.Response, body []byte) error {
 	message := fmt.Sprintf("failed to %s, status code: %d, response: %s", action, resp.StatusCode, string(body))
-	if missingEndpoint(resp, body) && securityEndpoint(resp) {
+	switch {
+	case missingEndpoint(resp, body) && supersetSixEndpoint(resp):
+		message += "\n" + supersetSixHint
+	case missingEndpoint(resp, body) && securityEndpoint(resp):
 		message += "\n" + securityAPIHint
 	}
 	return errors.New(message)

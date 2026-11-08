@@ -51,6 +51,7 @@ type dashboardResourceModel struct {
 	Owners               types.Set    `tfsdk:"owners"`
 	Roles                types.Set    `tfsdk:"roles"`
 	Tags                 types.Set    `tfsdk:"tags"`
+	ThemeID              types.Int64  `tfsdk:"theme_id"`
 }
 
 // stateSetter is the part of a state that stores a model.
@@ -131,6 +132,10 @@ func (r *dashboardResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"roles": schema.SetAttribute{
 				Description: "Identifiers of the roles granted access to the dashboard when dashboard role-based access control is enabled.",
 				ElementType: types.Int64Type,
+				Optional:    true,
+			},
+			"theme_id": schema.Int64Attribute{
+				Description: "Identifier of the `superset_theme` the dashboard applies, on Superset 6. Unset, the dashboard uses the theme of the instance.",
 				Optional:    true,
 			},
 			"tags": schema.SetAttribute{
@@ -215,6 +220,7 @@ func (r *dashboardResource) Update(ctx context.Context, req resource.UpdateReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	dashboard.ClearTheme = plan.ThemeID.IsNull() && !state.ThemeID.IsNull()
 
 	if err := r.client.UpdateDashboard(state.ID.ValueInt64(), dashboard); err != nil {
 		resp.Diagnostics.AddError("Unable to Update Superset Dashboard", err.Error())
@@ -319,6 +325,7 @@ func dashboardFromModel(ctx context.Context, model dashboardResourceModel) (clie
 		Published:            model.Published.ValueBool(),
 		CertifiedBy:          model.CertifiedBy.ValueString(),
 		CertificationDetails: model.CertificationDetails.ValueString(),
+		ThemeID:              model.ThemeID.ValueInt64Pointer(),
 	}
 
 	var diags diag.Diagnostics
@@ -357,6 +364,7 @@ func dashboardModel(ctx context.Context, dashboard *client.Dashboard, prior dash
 		Owners:               owners,
 		Roles:                roles,
 		Tags:                 tags,
+		ThemeID:              types.Int64PointerValue(dashboard.ThemeID),
 	}
 	return model, diags
 }
