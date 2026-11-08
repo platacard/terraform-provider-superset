@@ -39,6 +39,8 @@ type datasetResourceModel struct {
 	DatabaseName types.String `tfsdk:"database_name"`
 	Schema       types.String `tfsdk:"schema"`
 	SQL          types.String `tfsdk:"sql"`
+	Perm         types.String `tfsdk:"perm"`
+	SchemaPerm   types.String `tfsdk:"schema_perm"`
 }
 
 // Metadata returns the resource type name.
@@ -73,6 +75,14 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"sql": schema.StringAttribute{
 				Description: "SQL query for the dataset (optional, for SQL-based datasets).",
 				Optional:    true,
+			},
+			"perm": schema.StringAttribute{
+				Description: "View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.",
+				Computed:    true,
+			},
+			"schema_perm": schema.StringAttribute{
+				Description: "View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.",
+				Computed:    true,
 			},
 		},
 	}
@@ -141,6 +151,7 @@ func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest
 	})
 
 	// Set state to fully populated data
+	setDatasetPermissions(&plan)
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -197,6 +208,7 @@ func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	// Set refreshed state
+	setDatasetPermissions(&state)
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -234,6 +246,7 @@ func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest
 	})
 
 	// Set updated state
+	setDatasetPermissions(&plan)
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -298,4 +311,14 @@ func (r *datasetResource) ImportState(ctx context.Context, req resource.ImportSt
 	}
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+}
+
+// setDatasetPermissions derives the view menus of the dataset permissions the way Superset names
+// them: `[database].[table](id:N)` for the dataset and `[database].[schema]` for its schema.
+func setDatasetPermissions(model *datasetResourceModel) {
+	model.Perm = types.StringValue(fmt.Sprintf("[%s].[%s](id:%d)", model.DatabaseName.ValueString(), model.TableName.ValueString(), model.ID.ValueInt64()))
+	model.SchemaPerm = types.StringNull()
+	if schema := model.Schema.ValueString(); schema != "" {
+		model.SchemaPerm = types.StringValue(fmt.Sprintf("[%s].[%s]", model.DatabaseName.ValueString(), schema))
+	}
 }

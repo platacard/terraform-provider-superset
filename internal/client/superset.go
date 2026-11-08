@@ -147,7 +147,7 @@ func (c *Client) login() error {
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to authenticate with Superset, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("authenticate with Superset", resp, body)
 	}
 
 	var result map[string]interface{}
@@ -345,7 +345,7 @@ func (c *Client) CreateRole(name string) (int64, error) {
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body) // Read the response body
-		return 0, fmt.Errorf("failed to create role, status code: %d, response: %s", resp.StatusCode, string(body))
+		return 0, responseError("create role", resp, body)
 	}
 
 	var result map[string]interface{}
@@ -381,7 +381,7 @@ func (c *Client) GetRole(id int64) (*Role, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body for detailed error logging
-		return nil, fmt.Errorf("failed to fetch role, status code: %d, response: %s", resp.StatusCode, string(body))
+		return nil, responseError("fetch role", resp, body)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -444,7 +444,7 @@ func (c *Client) UpdateRole(id int64, name string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body
-		return fmt.Errorf("failed to update role, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("update role", resp, body)
 	}
 
 	fmt.Printf("Role with ID %d successfully updated to name '%s'.\n", id, name)
@@ -471,7 +471,7 @@ func (c *Client) DeleteRole(id int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body
-		return fmt.Errorf("failed to delete role, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("delete role", resp, body)
 	}
 
 	return nil
@@ -497,7 +497,7 @@ func (c *Client) UpdateRolePermissions(roleID int64, permissionIDs []int64) erro
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to update role permissions, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("update role permissions", resp, body)
 	}
 
 	return nil
@@ -524,7 +524,7 @@ func (c *Client) ClearRolePermissions(roleID int64) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body
-		return fmt.Errorf("failed to clear role permissions, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("clear role permissions", resp, body)
 	}
 
 	return nil
@@ -694,7 +694,7 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete database, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("delete database", resp, body)
 	}
 
 	return nil
@@ -733,7 +733,7 @@ func (c *Client) CreateDataset(dataset DatasetRequest) (*map[string]interface{},
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to create dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+		return nil, responseError("create dataset", resp, body)
 	}
 
 	var result map[string]interface{}
@@ -769,7 +769,7 @@ func (c *Client) GetDataset(id int64) (*map[string]interface{}, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+		return nil, responseError("fetch dataset", resp, body)
 	}
 
 	var result struct {
@@ -816,7 +816,7 @@ func (c *Client) UpdateDataset(id int64, tableName, schema, sql string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to update dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("update dataset", resp, body)
 	}
 
 	return nil
@@ -838,7 +838,7 @@ func (c *Client) DeleteDataset(id int64) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete dataset, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("delete dataset", resp, body)
 	}
 
 	return nil
@@ -964,7 +964,7 @@ func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("failed to create meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+		return 0, responseError("create meta database", resp, body)
 	}
 
 	var result map[string]interface{}
@@ -992,7 +992,7 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+		return nil, responseError("fetch meta database", resp, body)
 	}
 
 	var result struct {
@@ -1116,7 +1116,7 @@ func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to update meta database, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("update meta database", resp, body)
 	}
 
 	return nil
@@ -1194,7 +1194,7 @@ func (c *Client) GetUser(id int64) (*User, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch user, status code: %d, response: %s", resp.StatusCode, string(body))
+		return nil, responseError("fetch user", resp, body)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -1257,7 +1257,7 @@ func (c *Client) CreateUser(username, firstName, lastName, email, password strin
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("failed to create user, status code: %d, response: %s", resp.StatusCode, string(body))
+		return 0, responseError("create user", resp, body)
 	}
 
 	var result map[string]interface{}
@@ -1308,7 +1308,7 @@ func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, pass
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to update user, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("update user", resp, body)
 	}
 
 	return nil
@@ -1334,7 +1334,7 @@ func (c *Client) DeleteUser(id int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete user, status code: %d, response: %s", resp.StatusCode, string(body))
+		return responseError("delete user", resp, body)
 	}
 
 	return nil

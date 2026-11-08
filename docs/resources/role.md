@@ -3,12 +3,12 @@
 page_title: "superset_role Resource - superset"
 subcategory: ""
 description: |-
-  Manages a role in Superset.
+  Manages a role in Superset. Requires the Flask-AppBuilder security API, which Superset enables with FAB_ADD_SECURITY_API = True in superset_config.py.
 ---
 
 # superset_role (Resource)
 
-Manages a role in Superset.
+Manages a role in Superset. Requires the Flask-AppBuilder security API, which Superset enables with `FAB_ADD_SECURITY_API = True` in `superset_config.py`.
 
 ## Example Usage
 

@@ -49,7 +49,7 @@ func (r *roleResource) Metadata(_ context.Context, req resource.MetadataRequest,
 // Schema defines the schema for the resource.
 func (r *roleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a role in Superset.",
+		Description: "Manages a role in Superset. Requires the Flask-AppBuilder security API, which Superset enables with `FAB_ADD_SECURITY_API = True` in `superset_config.py`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Description: "Numeric identifier of the role.",

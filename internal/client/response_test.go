@@ -38,3 +38,33 @@ func TestDecodeResponse(t *testing.T) {
 		t.Error("expected a decoding error for a malformed body")
 	}
 }
+
+func TestDecodeResponseMissingEndpoint(t *testing.T) {
+	flaskNotFound := `{"errors": [{"message": "404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again."}]}`
+	cases := []struct {
+		name, path, body string
+		wantHint         bool
+		wantNotFound     bool
+	}{
+		{"security endpoint missing", "/api/v1/security/users/", flaskNotFound, true, false},
+		{"other endpoint missing", "/api/v1/theme/", flaskNotFound, false, false},
+		{"security object missing", "/api/v1/security/users/7", `{"message": "Not found"}`, false, true},
+		{"login route is not the security API", "/api/v1/security/login", flaskNotFound, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, "http://superset-host"+tc.path, nil)
+			resp := &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(tc.body)), Request: req}
+			err := decodeResponse(resp, nil, "fetch user")
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if errors.Is(err, ErrNotFound) != tc.wantNotFound {
+				t.Fatalf("ErrNotFound = %v, want %v (%v)", errors.Is(err, ErrNotFound), tc.wantNotFound, err)
+			}
+			if strings.Contains(err.Error(), "FAB_ADD_SECURITY_API") != tc.wantHint {
+				t.Fatalf("hint present = %v, want %v (%v)", !tc.wantHint, tc.wantHint, err)
+			}
+		})
+	}
+}

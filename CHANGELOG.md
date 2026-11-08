@@ -1,3 +1,9 @@
+## 0.7.0 (Unreleased)
+
+IMPROVEMENTS:
+* resource/superset_dataset: New computed `perm` and `schema_perm` attributes with the view menus of the dataset and schema permissions, for `superset_role_permissions`.
+* provider: When Superset does not expose the users, roles or permissions endpoints, the error explains that `FAB_ADD_SECURITY_API = True` is required instead of showing a raw 404, and such a 404 is no longer mistaken for a deleted object.
+
 ## 0.6.0 (2026-11-08)
 
 FEATURES:

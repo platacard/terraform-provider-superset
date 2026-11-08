@@ -57,7 +57,7 @@ func (r *userResource) Metadata(_ context.Context, req resource.MetadataRequest,
 // Schema defines the schema for the resource.
 func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a user in Superset.",
+		Description: "Manages a user in Superset. Requires the Flask-AppBuilder security API, which Superset enables with `FAB_ADD_SECURITY_API = True` in `superset_config.py`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Description: "Numeric identifier of the user.",

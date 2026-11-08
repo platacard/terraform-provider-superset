@@ -97,7 +97,7 @@ func decodeListPage(resp *http.Response, path string) (listPage, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return listPage{}, fmt.Errorf("failed to list %s, status code: %d, response: %s", path, resp.StatusCode, string(body))
+		return listPage{}, responseError("list "+path, resp, body)
 	}
 
 	var page listPage
