@@ -1,0 +1,90 @@
+# Local Superset instances to test the provider against: 6.1.0 on port 8088 and 3.1.3 on port
+# 8089, both with the admin/admin account, plus a PostgreSQL with a small table to build
+# datasets on. See README.md.
+name: superset-review
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: tf-review-pg
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpass
+      POSTGRES_DB: pgdb
+    volumes:
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d pgdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  superset-6:
+    image: apache/superset:6.1.0
+    container_name: superset-review
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The image has no PostgreSQL driver; installing it needs root, so the server runs as root
+    # in this review setup.
+    user: root
+    environment:
+      SUPERSET_SECRET_KEY: tf-review-secret-key-not-for-production
+      UV_NO_CACHE: "1"
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset-6:/app/pythonpath:ro
+      - superset6_home:/app/superset_home
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uv pip install --quiet psycopg2-binary &&
+        superset db upgrade &&
+        (superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin || true) &&
+        superset init &&
+        exec /app/docker/entrypoints/run-server.sh
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+  superset-3:
+    image: apache/superset:3.1.3
+    container_name: superset-review-313
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SUPERSET_SECRET_KEY: tf-review-secret-key-not-for-production
+      SUPERSET_CONFIG_PATH: /app/cfg/superset_config.py
+    ports:
+      - "8089:8088"
+    volumes:
+      - ./superset-3.1:/app/cfg:ro
+      - superset313_home:/app/superset_home
+    command:
+      - /bin/sh
+      - -c
+      - |
+        superset db upgrade &&
+        (superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin || true) &&
+        superset init &&
+        exec /usr/bin/run-server.sh
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  pg_data:
+  superset6_home:
+  superset313_home:
+
+networks:
+  default:
+    name: tf-review-net

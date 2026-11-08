@@ -45,6 +45,8 @@ To compile the provider, run `go install`. This will build the provider and put 
 
 To generate or update documentation, run `go generate`.
 
+The `docker-compose/` directory starts Superset 6.1.0, Superset 3.1.3 and a PostgreSQL to try the provider against; see its README.
+
 In order to run the full suite of Acceptance tests, run `make testacc`.
 
 *Note:* Acceptance tests create real resources, and often cost money to run.
