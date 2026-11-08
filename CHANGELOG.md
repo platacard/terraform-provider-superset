@@ -1,12 +1,13 @@
-## 0.5.0 (Unreleased)
+## 0.5.0 (2026-11-08)
 
 FEATURES:
 * provider: New `csrf_enabled` attribute (defaults to `true`). When `false`, the provider does not request a CSRF token before write requests, for Superset instances that run with `WTF_CSRF_ENABLED = False`.
 
 BUG FIXES:
 * resource/superset_dataset, resource/superset_role, resource/superset_role_permissions, resource/superset_user: Write requests now carry the CSRF token, like the database resources already did, so they work on a Superset instance with the default `WTF_CSRF_ENABLED = True`.
+* resource/superset_role_permissions: Reading the resource no longer reorders `resource_permissions` to the order returned by the API, which made every `terraform plan` report an update even when nothing had changed. `last_updated` is only set on create and update.
 
-## 0.4.0 (Unreleased)
+## 0.4.0 (2026-10-05)
 
 FEATURES:
 * provider: New `validate_credentials` attribute (defaults to `true`). When `false`, the provider does not log in on configure and `host`, `username` and `password` may be empty, so it can be declared where Superset is not available.
@@ -15,7 +16,7 @@ IMPROVEMENTS:
 * provider: The API client logs in lazily on the first request and shares one access token between concurrent operations.
 * provider: An expired access token (401) is refreshed once and the request is retried, instead of failing long-running applies.
 
-## 0.3.0 (TBD)
+## 0.3.0 (2025-11-14)
 
 FEATURES:
 * **New Resource**: `superset_user` - Manage Superset users
