@@ -32,6 +32,11 @@ func equals(column, value string) listFilter {
 	return listFilter{column: column, operator: "eq", value: risonString(value)}
 }
 
+// hasID matches the row with the given id.
+func hasID(id int64) listFilter {
+	return listFilter{column: "id", operator: "eq", value: strconv.FormatInt(id, 10)}
+}
+
 // relatedTo matches rows whose many-to-one relation column points at the row with the given id.
 func relatedTo(column string, id int64) listFilter {
 	return listFilter{column: column, operator: "rel_o_m", value: strconv.FormatInt(id, 10)}
