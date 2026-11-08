@@ -40,7 +40,7 @@ func (c *Client) CreateCSSTemplate(templateName, css string) (int64, error) {
 	var created struct {
 		ID int64 `json:"id"`
 	}
-	if err := decodeResponse(resp, http.StatusCreated, &created, "create CSS template"); err != nil {
+	if err := decodeResponse(resp, &created, "create CSS template"); err != nil {
 		return 0, err
 	}
 	return created.ID, nil
@@ -56,7 +56,7 @@ func (c *Client) GetCSSTemplate(id int64) (*CSSTemplate, error) {
 	var body struct {
 		Result CSSTemplate `json:"result"`
 	}
-	if err := decodeResponse(resp, http.StatusOK, &body, "fetch CSS template"); err != nil {
+	if err := decodeResponse(resp, &body, "fetch CSS template"); err != nil {
 		return nil, err
 	}
 	body.Result.ID = id
@@ -75,7 +75,7 @@ func (c *Client) UpdateCSSTemplate(id int64, templateName, css string) error {
 	if err != nil {
 		return err
 	}
-	return decodeResponse(resp, http.StatusOK, nil, "update CSS template")
+	return decodeResponse(resp, nil, "update CSS template")
 }
 
 // DeleteCSSTemplate deletes a template; a template that no longer exists is reported as ErrNotFound.
@@ -89,7 +89,7 @@ func (c *Client) DeleteCSSTemplate(id int64) error {
 	if err != nil {
 		return err
 	}
-	return decodeResponse(resp, http.StatusOK, nil, "delete CSS template")
+	return decodeResponse(resp, nil, "delete CSS template")
 }
 
 // FindCSSTemplateByName returns the template with exactly the given name, or ErrNotFound.

@@ -74,7 +74,7 @@ func (c *Client) CreateRowLevelSecurity(rule RowLevelSecurity) (int64, error) {
 	var created struct {
 		ID int64 `json:"id"`
 	}
-	if err := decodeResponse(resp, http.StatusCreated, &created, "create row level security rule"); err != nil {
+	if err := decodeResponse(resp, &created, "create row level security rule"); err != nil {
 		return 0, err
 	}
 	return created.ID, nil
@@ -90,7 +90,7 @@ func (c *Client) GetRowLevelSecurity(id int64) (*RowLevelSecurity, error) {
 	var body struct {
 		Result rowLevelSecurityResult `json:"result"`
 	}
-	if err := decodeResponse(resp, http.StatusOK, &body, "fetch row level security rule"); err != nil {
+	if err := decodeResponse(resp, &body, "fetch row level security rule"); err != nil {
 		return nil, err
 	}
 
@@ -118,7 +118,7 @@ func (c *Client) UpdateRowLevelSecurity(id int64, rule RowLevelSecurity) error {
 	if err != nil {
 		return err
 	}
-	return decodeResponse(resp, http.StatusOK, nil, "update row level security rule")
+	return decodeResponse(resp, nil, "update row level security rule")
 }
 
 // DeleteRowLevelSecurity deletes a rule; a rule that no longer exists is reported as ErrNotFound.
@@ -132,7 +132,7 @@ func (c *Client) DeleteRowLevelSecurity(id int64) error {
 	if err != nil {
 		return err
 	}
-	return decodeResponse(resp, http.StatusOK, nil, "delete row level security rule")
+	return decodeResponse(resp, nil, "delete row level security rule")
 }
 
 func nullIfEmpty(s string) *string {
