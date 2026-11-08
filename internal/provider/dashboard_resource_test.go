@@ -38,6 +38,12 @@ func (f *fakeDashboard) serve() {
 	httpmock.RegisterResponder("POST", "http://superset-host/api/v1/dashboard/",
 		func(req *http.Request) (*http.Response, error) {
 			payload := decode(req)
+			// Unlike the update endpoint, the create endpoint rejects null documents.
+			for _, key := range []string{"css", "json_metadata", "position_json"} {
+				if value, present := payload[key]; present && value == nil {
+					return httpmock.NewStringResponse(400, `{"message": {"`+key+`": ["Field may not be null."]}}`), nil
+				}
+			}
 			f.mu.Lock()
 			f.dashboard, f.charts, f.deleted = payload, nil, false
 			f.mu.Unlock()
