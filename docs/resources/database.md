@@ -3,29 +3,56 @@
 page_title: "superset_database Resource - superset"
 subcategory: ""
 description: |-
-  Manages a database connection in Superset.
+  Manages a database connection. The connection is given either as a full sqlalchemy_uri or as its parts (db_engine, db_user, db_pass, db_host, db_port and db_name). Superset tests the connection when it is created or updated.
 ---
 
 # superset_database (Resource)
 
-Manages a database connection in Superset.
+Manages a database connection. The connection is given either as a full `sqlalchemy_uri` or as its parts (`db_engine`, `db_user`, `db_pass`, `db_host`, `db_port` and `db_name`). Superset tests the connection when it is created or updated.
 
 ## Example Usage
 
 ```terraform
-resource "superset_database" "example" {
-  connection_name  = "SuperSetDBConnection"
+# A connection given as its parts.
+resource "superset_database" "warehouse" {
+  connection_name  = "Warehouse"
   db_engine        = "postgresql"
-  db_user          = "supersetuser"
-  db_pass          = "dbpassword"
+  db_user          = "superset"
+  db_pass          = var.warehouse_password
   db_host          = "pg.db.ro.domain.com"
   db_port          = 5432
-  db_name          = "supersetdb"
+  db_name          = "warehouse"
   allow_ctas       = false
   allow_cvas       = false
   allow_dml        = false
   allow_run_async  = true
-  expose_in_sqllab = false
+  expose_in_sqllab = true
+}
+
+# A connection given as a URI, reached through an SSH tunnel, with file uploads into one schema.
+resource "superset_database" "analytics" {
+  connection_name   = "Analytics"
+  sqlalchemy_uri    = "postgresql://superset:${var.analytics_password}@pg.internal:5432/analytics"
+  allow_ctas        = true
+  allow_cvas        = false
+  allow_dml         = false
+  allow_run_async   = true
+  expose_in_sqllab  = true
+  allow_file_upload = true
+  cache_timeout     = 600
+  force_ctas_schema = "scratch"
+
+  extra = jsonencode({
+    client_encoding                 = "utf8"
+    schemas_allowed_for_file_upload = ["uploads"]
+  })
+
+  ssh_tunnel = {
+    server_address = "bastion.internal"
+    server_port    = 22
+    username       = "superset"
+    private_key    = file("${path.module}/bastion_rsa.pem")
+  }
 }
 ```
 
@@ -34,22 +61,49 @@ resource "superset_database" "example" {
 
 ### Required
 
-- `allow_ctas` (Boolean) Allow CTAS.
-- `allow_cvas` (Boolean) Allow CVAS.
-- `allow_dml` (Boolean) Allow DML.
-- `allow_run_async` (Boolean) Allow run async.
+- `allow_ctas` (Boolean) Whether `CREATE TABLE AS` is allowed in SQL Lab.
+- `allow_cvas` (Boolean) Whether `CREATE VIEW AS` is allowed in SQL Lab.
+- `allow_dml` (Boolean) Whether DML statements are allowed in SQL Lab.
+- `allow_run_async` (Boolean) Whether SQL Lab queries run asynchronously through Celery.
 - `connection_name` (String) Name of the database connection.
-- `db_engine` (String) Database engine (e.g., postgresql, mysql).
-- `db_host` (String) Database host.
-- `db_name` (String) Database name.
-- `db_pass` (String, Sensitive) Database password.
-- `db_port` (Number) Database port.
-- `db_user` (String) Database username.
-- `expose_in_sqllab` (Boolean) Expose in SQL Lab.
+- `expose_in_sqllab` (Boolean) Whether the connection is available in SQL Lab.
+
+### Optional
+
+- `allow_file_upload` (Boolean) Whether files can be uploaded into the database. The allowed schemas are set in `extra` as `schemas_allowed_for_file_upload`. Defaults to `false`.
+- `cache_timeout` (Number) Duration in seconds for which the charts of the database are cached. When unset, the value is left as it is in Superset: the timeout of the Superset instance for a new connection.
+- `db_engine` (String) SQLAlchemy dialect of the connection, for example `postgresql` or `mysql+pymysql`. Required with the other parts when `sqlalchemy_uri` is not set.
+- `db_host` (String) Host of the database server.
+- `db_name` (String) Name of the database.
+- `db_pass` (String, Sensitive) Password of the connection. It is inserted into the URI as is, so percent-encode special characters or use `sqlalchemy_uri`.
+- `db_port` (Number) Port of the database server.
+- `db_user` (String) Username of the connection.
+- `extra` (String) JSON document with the extra configuration of the connection, such as `engine_params`, `metadata_params` or `schemas_allowed_for_file_upload`. Defaults to `{"client_encoding": "utf8"}` when the connection is created without it.
+- `force_ctas_schema` (String) Schema in which `CREATE TABLE AS` creates its tables when the query does not name one.
+- `impersonate_user` (Boolean) Whether queries run as the logged-in user instead of the user of the connection. Defaults to `false`.
+- `masked_encrypted_extra` (String, Sensitive) JSON document with the encrypted extra configuration of the connection, such as the credentials of BigQuery or Google Sheets. Superset masks it in its responses, so changes made in the UI are not detected.
+- `server_cert` (String) CA bundle, in PEM format, used to validate the certificate of the database server.
+- `sqlalchemy_uri` (String, Sensitive) Full SQLAlchemy URI of the connection, for engines whose URI does not fit the parts, for example `awsathena+rest://...` or `trino://...`. Conflicts with the parts. Changes made to the URI in the Superset UI are not detected, because Superset masks the password in the URI it returns.
+- `ssh_tunnel` (Attributes) SSH tunnel through which Superset reaches the database. Requires the `SSH_TUNNELING` feature flag in Superset. Superset authenticates with either `password` or `private_key`; the private key must be an RSA key. (see [below for nested schema](#nestedatt--ssh_tunnel))
 
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the database connection.
+
+<a id="nestedatt--ssh_tunnel"></a>
+### Nested Schema for `ssh_tunnel`
+
+Required:
+
+- `server_address` (String) Host of the SSH server.
+- `server_port` (Number) Port of the SSH server.
+- `username` (String) User on the SSH server.
+
+Optional:
+
+- `password` (String, Sensitive) Password of the user. Conflicts with `private_key`.
+- `private_key` (String, Sensitive) RSA private key of the user, in PEM format. Conflicts with `password`.
+- `private_key_password` (String, Sensitive) Passphrase of the private key.
 
 ## Import
 

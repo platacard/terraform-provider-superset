@@ -668,63 +668,6 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 	return map[string]interface{}{"databases": databasesList}, nil
 }
 
-// CreateDatabase creates a new database in the Superset application.
-// It takes a payload map[string]interface{} as input, which contains the necessary data for creating the database.
-// The function returns a map[string]interface{} containing the response from the API and an error, if any.
-func (c *Client) CreateDatabase(payload map[string]interface{}) (map[string]interface{}, error) {
-	headers, cookies, err := c.csrfHeaders()
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.DoRequestWithHeadersAndCookies("POST", "/api/v1/database/", payload, headers, cookies)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to create database, status code: %d, response: %s", resp.StatusCode, string(body))
-	}
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// UpdateDatabase updates a database with the given ID using the provided payload.
-// It returns the updated database as a map[string]interface{} and an error if any.
-func (c *Client) UpdateDatabase(databaseID int64, payload map[string]interface{}) (map[string]interface{}, error) {
-	headers, cookies, err := c.csrfHeaders()
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.DoRequestWithHeadersAndCookies("PUT", fmt.Sprintf("/api/v1/database/%d", databaseID), payload, headers, cookies)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to update database, status code: %d, response: %s", resp.StatusCode, string(body))
-	}
-
-	var result map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
 // DeleteDatabase deletes a database with the given databaseID.
 // It sends a DELETE request to the Superset API to delete the database.
 // If the request is successful, it returns nil. Otherwise, it returns an error.
