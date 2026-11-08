@@ -1,7 +1,8 @@
-## 1.0.0 (Unreleased)
+## 1.0.0 (2026-11-08)
 
 FEATURES:
 * **New Resource**: `superset_report` - Manage the alerts and reports of the Alerts & Reports page: a chart or a dashboard sent to email or Slack recipients on a schedule, or when a SQL query meets a condition.
+* repository: A `docker-compose/` setup with Superset 6.1.0, Superset 3.1.3 and a PostgreSQL to test the provider against, the one the resources were verified on.
 * **New Resource**: `superset_theme` - Manage the themes of Superset 6, including the default and the dark theme of the instance.
 * **New Resource**: `superset_group` - Manage the groups of users of Superset 6, with their roles and members.
 * **New Resource**: `superset_database_permissions_sync` - Make Superset 6 refresh the catalog and schema permissions of a database connection.
