@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -480,6 +481,10 @@ func (r *metaDatabaseResource) Delete(ctx context.Context, req resource.DeleteRe
 	}
 
 	err := r.client.DeleteMetaDatabase(state.ID.ValueInt64())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "meta database no longer exists in Superset", map[string]any{"id": state.ID.ValueInt64()})
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Delete Superset Meta Database",

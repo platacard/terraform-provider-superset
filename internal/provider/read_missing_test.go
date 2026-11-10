@@ -142,3 +142,74 @@ func diagnosticsText(diags []*tfprotov6.Diagnostic) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// Deleting an object that no longer exists must succeed: the object is gone either way. It
+// happens when someone deletes the object outside Terraform between a refresh and the destroy,
+// and in programs that delete without refreshing first.
+func TestDeleteOfAMissingObjectSucceeds(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+	serveNothing()
+	httpmock.RegisterNoResponder(func(req *http.Request) (*http.Response, error) {
+		return httpmock.NewJsonResponse(http.StatusNotFound, map[string]string{"message": "Not found"})
+	})
+
+	ctx := context.Background()
+	server := providerserver.NewProtocol6(New("test")())()
+	schemas, err := server.GetProviderSchema(ctx, &tfprotov6.GetProviderSchemaRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerConfig, err := tfprotov6.NewDynamicValue(schemas.Provider.ValueType(), tftypes.NewValue(schemas.Provider.ValueType(), map[string]tftypes.Value{
+		"host":                 tftypes.NewValue(tftypes.String, "http://superset-host"),
+		"username":             tftypes.NewValue(tftypes.String, "user"),
+		"password":             tftypes.NewValue(tftypes.String, "pass"),
+		"validate_credentials": tftypes.NewValue(tftypes.Bool, true),
+		"csrf_enabled":         tftypes.NewValue(tftypes.Bool, true),
+		"auth_provider":        tftypes.NewValue(tftypes.String, nil),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured, err := server.ConfigureProvider(ctx, &tfprotov6.ConfigureProviderRequest{Config: &providerConfig}); err != nil || hasErrorDiagnostic(configured.Diagnostics) {
+		t.Fatalf("configure: %v %v", err, configured.Diagnostics)
+	}
+
+	for name, s := range schemas.ResourceSchemas {
+		t.Run(name, func(t *testing.T) {
+			objectType := s.ValueType().(tftypes.Object)
+			values := map[string]tftypes.Value{}
+			for attr, typ := range objectType.AttributeTypes {
+				values[attr] = tftypes.NewValue(typ, nil)
+			}
+			for _, a := range s.Block.Attributes {
+				if a.Required || a.Name == "id" {
+					values[a.Name] = placeholder(objectType.AttributeTypes[a.Name])
+				}
+			}
+			// The import resources delete the objects of their last import.
+			for _, ids := range []string{"dashboard_ids", "chart_ids", "dataset_ids"} {
+				if typ, ok := objectType.AttributeTypes[ids]; ok {
+					values[ids] = tftypes.NewValue(typ, map[string]tftypes.Value{"11111111-1111-1111-1111-111111111111": tftypes.NewValue(tftypes.Number, big.NewFloat(7))})
+				}
+			}
+			prior, err := tfprotov6.NewDynamicValue(objectType, tftypes.NewValue(objectType, values))
+			if err != nil {
+				t.Fatal(err)
+			}
+			planned, err := tfprotov6.NewDynamicValue(objectType, tftypes.NewValue(objectType, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := server.ApplyResourceChange(ctx, &tfprotov6.ApplyResourceChangeRequest{
+				TypeName: name, PriorState: &prior, PlannedState: &planned, Config: &planned,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasErrorDiagnostic(resp.Diagnostics) {
+				t.Fatalf("deleting an object that is gone failed: %s", diagnosticsText(resp.Diagnostics))
+			}
+		})
+	}
+}
