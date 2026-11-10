@@ -12,13 +12,16 @@ import (
 	"time"
 )
 
-// Global cache for GetAllDatabases to avoid multiple API calls across different client instances.
-var (
-	globalDatabasesCache      []map[string]interface{}
-	globalDatabasesCacheTime  time.Time
-	globalDatabasesCacheTTL   = 5 * time.Minute // Cache for 5 minutes
-	globalDatabasesCacheMutex sync.RWMutex
-)
+// RequestTimeout bounds every request to Superset, including reading the response, so that a
+// server that stops answering fails the operation instead of blocking it forever.
+const RequestTimeout = 5 * time.Minute
+
+// databasesCacheTTL is how long a client reuses the list of database connections.
+const databasesCacheTTL = 5 * time.Minute
+
+// httpClient sends the requests of every Client. It uses http.DefaultTransport, so proxy
+// settings from the environment apply.
+var httpClient = &http.Client{Timeout: RequestTimeout}
 
 // Client represents a client for Superset API.
 //
@@ -38,6 +41,13 @@ type Client struct {
 	token string
 
 	permissions permissionIndex
+
+	// databases caches the list of database connections of this client, see GetAllDatabases.
+	databases struct {
+		sync.Mutex
+		rows    []map[string]interface{}
+		fetched time.Time
+	}
 }
 
 // NewClient creates a new Superset client with the specified host, username, and password.
@@ -136,7 +146,7 @@ func (c *Client) login() error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -202,7 +212,7 @@ func (c *Client) sendWithToken(token, method, endpoint string, body []byte, head
 		req.AddCookie(cookie)
 	}
 
-	return http.DefaultClient.Do(req)
+	return httpClient.Do(req)
 }
 
 // marshalPayload serializes a request payload to JSON; a nil payload produces an empty body.
@@ -425,7 +435,6 @@ func (c *Client) UpdateRole(id int64, name string) error {
 	}
 
 	if existingRole.Name == name {
-		fmt.Printf("Role with ID %d already has the name '%s'. No update necessary.\n", id, name)
 		return nil
 	}
 
@@ -447,7 +456,6 @@ func (c *Client) UpdateRole(id int64, name string) error {
 		return responseError("update role", resp, body)
 	}
 
-	fmt.Printf("Role with ID %d successfully updated to name '%s'.\n", id, name)
 	return nil
 }
 
@@ -585,40 +593,32 @@ func (c *Client) GetDatabaseConnectionByID(databaseID int64) (map[string]interfa
 	return result, nil
 }
 
-// GetAllDatabases retrieves all databases from Superset with global caching.
+// GetAllDatabases returns every database connection of the Superset instance. The list is
+// cached by the client for databasesCacheTTL, and the cache is dropped whenever the client
+// creates, updates or deletes a database connection. The cache belongs to the client, so
+// clients of different Superset instances or users never share it.
 func (c *Client) GetAllDatabases() ([]map[string]interface{}, error) {
-	// Check global cache first (read lock)
-	globalDatabasesCacheMutex.RLock()
-	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
-		fmt.Printf("DEBUG GetAllDatabases: Using global cached result with %d databases (age: %v)\n",
-			len(globalDatabasesCache), time.Since(globalDatabasesCacheTime))
-		result := globalDatabasesCache
-		globalDatabasesCacheMutex.RUnlock()
-		return result, nil
-	}
-	globalDatabasesCacheMutex.RUnlock()
+	c.databases.Lock()
+	defer c.databases.Unlock()
 
-	// Need to fetch data - acquire write lock
-	globalDatabasesCacheMutex.Lock()
-	defer globalDatabasesCacheMutex.Unlock()
-
-	// Double-check in case another goroutine already fetched while we were waiting
-	if len(globalDatabasesCache) > 0 && time.Since(globalDatabasesCacheTime) < globalDatabasesCacheTTL {
-		fmt.Printf("DEBUG GetAllDatabases: Using global cached result (double-check) with %d databases\n", len(globalDatabasesCache))
-		return globalDatabasesCache, nil
+	if c.databases.rows != nil && time.Since(c.databases.fetched) < databasesCacheTTL {
+		return c.databases.rows, nil
 	}
 
 	databases, err := listInto[map[string]interface{}](c, "/api/v1/database/")
 	if err != nil {
 		return nil, err
 	}
-
-	// Cache the result globally
-	globalDatabasesCache = databases
-	globalDatabasesCacheTime = time.Now()
-
-	fmt.Printf("DEBUG GetAllDatabases: Retrieved and cached globally %d databases total\n", len(databases))
+	c.databases.rows = databases
+	c.databases.fetched = time.Now()
 	return databases, nil
+}
+
+// forgetDatabases drops the cached list of database connections after a change.
+func (c *Client) forgetDatabases() {
+	c.databases.Lock()
+	defer c.databases.Unlock()
+	c.databases.rows = nil
 }
 
 // GetDatabasesInfos retrieves information about all databases.
@@ -681,6 +681,7 @@ func (c *Client) GetDatabasesInfos() (map[string]interface{}, error) {
 // It sends a DELETE request to the Superset API to delete the database.
 // If the request is successful, it returns nil. Otherwise, it returns an error.
 func (c *Client) DeleteDatabase(databaseID int64) error {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
@@ -742,22 +743,36 @@ func (c *Client) FindDatabaseByName(databaseName string) (*DatabaseSummary, erro
 	return nil, fmt.Errorf("database %q: %w", databaseName, ErrNotFound)
 }
 
-// GetDatabaseNameByID finds database name by ID using cached database list.
+// GetDatabaseNameByID returns the name of the database connection with the given id. It reads
+// the connection itself rather than the cached list, so a connection created or renamed a
+// moment ago is found with its current name.
 func (c *Client) GetDatabaseNameByID(databaseID int64) (string, error) {
-	databases, err := c.GetAllDatabases()
+	resp, err := c.DoRequest("GET", fmt.Sprintf("/api/v1/database/%d", databaseID), nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch databases: %w", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("database with ID %d: %w", databaseID, ErrNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", responseError("read database", resp, body)
 	}
 
-	for _, db := range databases {
-		if id, ok := db["id"].(float64); ok && int64(id) == databaseID {
-			if name, ok := db["database_name"].(string); ok {
-				return name, nil
-			}
-		}
+	var result struct {
+		Result struct {
+			DatabaseName string `json:"database_name"`
+		} `json:"result"`
 	}
-
-	return "", fmt.Errorf("database with ID %d not found", databaseID)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to decode database %d: %w", databaseID, err)
+	}
+	return result.Result.DatabaseName, nil
 }
 
 // rawRoleModel represents a raw role model in the Superset client.
@@ -801,6 +816,7 @@ type MetaDatabase struct {
 // CreateMetaDatabase creates a meta database connection in Superset.
 // It takes a MetaDatabase struct and returns the created database ID and an error.
 func (c *Client) CreateMetaDatabase(metaDB *MetaDatabase) (int64, error) {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
@@ -885,74 +901,42 @@ func (c *Client) GetMetaDatabase(id int64) (*MetaDatabase, error) {
 
 	metaDB := &result.Result
 
-	// For debugging, also try to get full database info from list endpoint
-	fmt.Printf("DEBUG GetMetaDatabase: Trying to get extra field from list endpoint for ID %d\n", id)
-	allDBs, listErr := c.GetAllDatabases()
-	if listErr == nil {
-		fmt.Printf("DEBUG GetMetaDatabase: Successfully got %d databases from list endpoint\n", len(allDBs))
-		found := false
+	// The detail endpoint does not return the extra field of every Superset version, so the
+	// extra field of the list of connections is used when it has one.
+	if allDBs, err := c.GetAllDatabases(); err == nil {
 		for _, db := range allDBs {
-			if dbIDFloat, ok := db["id"].(float64); ok && int64(dbIDFloat) == id {
-				found = true
-				fmt.Printf("DEBUG GetMetaDatabase: Found matching database in list: %+v\n", db)
-				if extraStr, ok := db["extra"].(string); ok {
-					if extraStr != "" {
-						fmt.Printf("DEBUG GetMetaDatabase: Found extra field from list endpoint: %q\n", extraStr)
-						metaDB.Extra = extraStr
-					} else {
-						fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty even in list endpoint\n")
-					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No extra field found in list endpoint response\n")
+			if dbID, ok := db["id"].(float64); ok && int64(dbID) == id {
+				if extra, ok := db["extra"].(string); ok && extra != "" {
+					metaDB.Extra = extra
 				}
 				break
 			}
 		}
-		if !found {
-			fmt.Printf("DEBUG GetMetaDatabase: Database ID %d not found in list of %d databases\n", id, len(allDBs))
-		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Failed to get from list endpoint: %v\n", listErr)
 	}
 
-	// Parse allowed_dbs from extra field
-	fmt.Printf("DEBUG GetMetaDatabase: Raw extra field = %q\n", metaDB.Extra)
+	// The allowed databases are the engine_params.allowed_dbs of the extra field.
 	if metaDB.Extra != "" {
-		var extraData map[string]interface{}
-		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil {
-			fmt.Printf("DEBUG GetMetaDatabase: Parsed extraData = %+v\n", extraData)
-			if engineParams, ok := extraData["engine_params"].(map[string]interface{}); ok {
-				fmt.Printf("DEBUG GetMetaDatabase: Found engine_params = %+v\n", engineParams)
-				if allowedDBs, ok := engineParams["allowed_dbs"].([]interface{}); ok {
-					fmt.Printf("DEBUG GetMetaDatabase: Found allowed_dbs = %+v (length: %d)\n", allowedDBs, len(allowedDBs))
-					metaDB.AllowedDBs = make([]string, len(allowedDBs))
-					for i, db := range allowedDBs {
-						if dbStr, ok := db.(string); ok {
-							metaDB.AllowedDBs[i] = dbStr
-							fmt.Printf("DEBUG GetMetaDatabase: Added allowed_db[%d] = %q\n", i, dbStr)
-						} else {
-							fmt.Printf("DEBUG GetMetaDatabase: Failed to convert allowed_db[%d] to string: %+v (type: %T)\n", i, db, db)
-						}
-					}
-				} else {
-					fmt.Printf("DEBUG GetMetaDatabase: No 'allowed_dbs' found in engine_params\n")
-				}
-			} else {
-				fmt.Printf("DEBUG GetMetaDatabase: No 'engine_params' found in extraData\n")
-			}
-		} else {
-			fmt.Printf("DEBUG GetMetaDatabase: Failed to unmarshal extra field as JSON: %v\n", err)
+		var extraData struct {
+			EngineParams struct {
+				AllowedDBs []interface{} `json:"allowed_dbs"`
+			} `json:"engine_params"`
 		}
-	} else {
-		fmt.Printf("DEBUG GetMetaDatabase: Extra field is empty\n")
+		if err := json.Unmarshal([]byte(metaDB.Extra), &extraData); err == nil && extraData.EngineParams.AllowedDBs != nil {
+			metaDB.AllowedDBs = make([]string, 0, len(extraData.EngineParams.AllowedDBs))
+			for _, db := range extraData.EngineParams.AllowedDBs {
+				if name, ok := db.(string); ok {
+					metaDB.AllowedDBs = append(metaDB.AllowedDBs, name)
+				}
+			}
+		}
 	}
-	fmt.Printf("DEBUG GetMetaDatabase: Final AllowedDBs = %+v (length: %d)\n", metaDB.AllowedDBs, len(metaDB.AllowedDBs))
 
 	return metaDB, nil
 }
 
 // UpdateMetaDatabase updates a meta database with the given ID.
 func (c *Client) UpdateMetaDatabase(id int64, metaDB *MetaDatabase) error {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
