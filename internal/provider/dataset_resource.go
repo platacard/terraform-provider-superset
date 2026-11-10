@@ -349,7 +349,7 @@ func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	r.readInto(ctx, id, plan.Columns, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Creation")
+	r.readInto(ctx, id, plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Creation")
 }
 
 // Read refreshes the Terraform state with the dataset as it is in Superset.
@@ -371,7 +371,7 @@ func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	model, diags := datasetModel(ctx, dataset, state.Columns)
+	model, diags := datasetModel(ctx, dataset, state.Columns, state.CacheTimeout)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -399,7 +399,7 @@ func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	r.readInto(ctx, state.ID.ValueInt64(), plan.Columns, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Update")
+	r.readInto(ctx, state.ID.ValueInt64(), plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Dataset After Update")
 }
 
 // Delete deletes the dataset; a dataset that is already gone is not an error.
@@ -448,14 +448,14 @@ func (r *datasetResource) Configure(_ context.Context, req resource.ConfigureReq
 // readInto fetches the dataset and stores it in the state after a create or an update, so the
 // state carries the values Superset computed, such as the owners or the main datetime column.
 // The planned columns tell which of their attributes the configuration sets.
-func (r *datasetResource) readInto(ctx context.Context, id int64, columns types.Set, state stateSetter, diags *diag.Diagnostics, summary string) {
+func (r *datasetResource) readInto(ctx context.Context, id int64, prior datasetResourceModel, state stateSetter, diags *diag.Diagnostics, summary string) {
 	dataset, err := r.client.GetDataset(id)
 	if err != nil {
 		diags.AddError(summary, err.Error())
 		return
 	}
 
-	model, d := datasetModel(ctx, dataset, columns)
+	model, d := datasetModel(ctx, dataset, prior.Columns, prior.CacheTimeout)
 	diags.Append(d...)
 	if diags.HasError() {
 		return
@@ -537,7 +537,9 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 // datasetModel maps a dataset to the state, with the view menus of its permissions. The prior
 // columns, from the plan or the state, tell which attributes of a column the configuration
 // sets: the others stay null, so the values Superset keeps do not show up as changes.
-func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns types.Set) (datasetResourceModel, diag.Diagnostics) {
+// datasetModel maps a dataset to the state. priorColumns and priorCacheTimeout are the values of
+// the plan or the prior state.
+func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns types.Set, priorCacheTimeout types.Int64) (datasetResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
 	metrics := make([]datasetMetricModel, 0, len(dataset.Metrics))
 	for _, metric := range dataset.Metrics {
@@ -563,7 +565,7 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns typ
 		SQL:                  optionalString(dataset.SQL),
 		Description:          optionalString(dataset.Description),
 		Owners:               owners,
-		CacheTimeout:         types.Int64PointerValue(dataset.CacheTimeout),
+		CacheTimeout:         datasetCacheTimeout(dataset.CacheTimeout, priorCacheTimeout),
 		MainDttmCol:          optionalString(dataset.MainDttmCol),
 		TemplateParams:       jsonDocument.value(dataset.TemplateParams),
 		Extra:                jsonDocument.value(dataset.Extra),
@@ -577,6 +579,16 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns typ
 	}
 	setDatasetPermissions(&model)
 	return model, diags
+}
+
+// datasetCacheTimeout maps the cache timeout of a dataset to the state. Superset reports 0, its
+// default, for a dataset whose cache timeout was never set, so 0 stays null when the
+// configuration does not set the attribute.
+func datasetCacheTimeout(value *int64, prior types.Int64) types.Int64 {
+	if prior.IsNull() && (value == nil || *value == 0) {
+		return types.Int64Null()
+	}
+	return types.Int64PointerValue(value)
 }
 
 // datasetColumnsValue maps the columns of a dataset to the state. A column that the prior
