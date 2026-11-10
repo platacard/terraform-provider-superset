@@ -20,9 +20,10 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource               = &assetsImportResource{}
-	_ resource.ResourceWithConfigure  = &assetsImportResource{}
-	_ resource.ResourceWithModifyPlan = &assetsImportResource{}
+	_ resource.Resource                   = &assetsImportResource{}
+	_ resource.ResourceWithConfigure      = &assetsImportResource{}
+	_ resource.ResourceWithModifyPlan     = &assetsImportResource{}
+	_ resource.ResourceWithValidateConfig = &assetsImportResource{}
 )
 
 // assetKinds are the kinds of objects whose identifiers the resource records, in the order they
@@ -55,7 +56,7 @@ func (r *assetsImportResource) Metadata(_ context.Context, req resource.Metadata
 func (r *assetsImportResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	secretMap := func(description string) schema.MapAttribute {
 		return schema.MapAttribute{
-			Description: description + " Keyed by the path of the database file inside the bundle, such as `databases/warehouse.yaml`.",
+			Description: description + bundleSecretDescription,
 			ElementType: types.StringType,
 			Optional:    true,
 			Sensitive:   true,
@@ -72,9 +73,10 @@ func (r *assetsImportResource) Schema(_ context.Context, _ resource.SchemaReques
 		Description: "Imports a whole export bundle at once through the assets endpoint: its databases, datasets, charts, dashboards and saved queries, overwriting the ones that exist, and imports it again whenever its files change. Destroying the resource deletes the imported dashboards, charts and datasets, in that order; the databases stay.",
 		Attributes: map[string]schema.Attribute{
 			"source": schema.StringAttribute{
-				Description: "Directory in the export layout of Superset (`dashboards/`, `charts/`, `datasets/`, `databases/`, `queries/`), or an export zip file. A directory is bundled by the provider with a `metadata.yaml` of the `assets` type.",
-				Required:    true,
+				Description: "Directory in the export layout of Superset (`dashboards/`, `charts/`, `datasets/`, `databases/`, `queries/`), or an export zip file. A directory is bundled by the provider with a `metadata.yaml` of the `assets` type. Exactly one of `source` and `files` must be set.",
+				Optional:    true,
 			},
+			"files": bundleFilesAttribute(),
 			"sparse": schema.BoolAttribute{
 				Description: "Whether the dashboards of the bundle may reference charts that exist in Superset but are not in the bundle. Recent versions of Superset only. Defaults to `false`.",
 				Optional:    true,
@@ -103,15 +105,9 @@ func (r *assetsImportResource) ModifyPlan(ctx context.Context, req resource.Modi
 		return
 	}
 
-	var source types.String
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("source"), &source)...)
-	if resp.Diagnostics.HasError() || source.IsUnknown() {
-		return
-	}
-
-	loaded, err := bundle.Load(source.ValueString(), bundle.Assets)
-	if err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("source"), "Unable to Load the Bundle", err.Error())
+	loaded, diags := loadConfiguredBundle(ctx, req.Config, bundle.Assets)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() || loaded == nil {
 		return
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("content_hash"), loaded.Hash)...)
@@ -125,6 +121,11 @@ func (r *assetsImportResource) ModifyPlan(ctx context.Context, req resource.Modi
 			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root(kind.idsName), types.MapUnknown(types.Int64Type))...)
 		}
 	}
+}
+
+// ValidateConfig checks that the configuration sets exactly one of source and files.
+func (r *assetsImportResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	resp.Diagnostics.Append(validateBundleAttributes(ctx, req.Config)...)
 }
 
 // Create imports the bundle and sets the initial Terraform state.
@@ -201,9 +202,7 @@ func (r *assetsImportResource) Configure(_ context.Context, req resource.Configu
 // apply imports the bundle described by the plan, locates the imported objects of every kind
 // and stores the plan with the hash and the identifiers in the state.
 func (r *assetsImportResource) apply(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
-	var source types.String
 	var sparse types.Bool
-	diags.Append(plan.GetAttribute(ctx, path.Root("source"), &source)...)
 	diags.Append(plan.GetAttribute(ctx, path.Root("sparse"), &sparse)...)
 	options, d := importSecrets(ctx, plan)
 	diags.Append(d...)
@@ -211,9 +210,13 @@ func (r *assetsImportResource) apply(ctx context.Context, plan tfsdk.Plan, state
 		return
 	}
 
-	loaded, err := bundle.Load(source.ValueString(), bundle.Assets)
-	if err != nil {
-		diags.AddAttributeError(path.Root("source"), "Unable to Load the Bundle", err.Error())
+	loaded, d := loadConfiguredBundle(ctx, plan, bundle.Assets)
+	diags.Append(d...)
+	if diags.HasError() {
+		return
+	}
+	if loaded == nil {
+		diags.AddError("Unable to Load the Bundle", "The source or files of the bundle are not known.")
 		return
 	}
 	if err := r.client.ImportAssets(loaded.Content, options, sparse.ValueBool()); err != nil {
@@ -245,26 +248,6 @@ func (r *assetsImportResource) apply(ctx context.Context, plan tfsdk.Plan, state
 		}
 		diags.Append(state.SetAttribute(ctx, path.Root(kind.idsName), idsValue)...)
 	}
-}
-
-// importSecrets reads the passwords and SSH tunnel secrets of an import from the plan.
-func importSecrets(ctx context.Context, plan tfsdk.Plan) (client.ImportOptions, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	var options client.ImportOptions
-	secrets := map[string]*map[string]string{
-		"database_passwords":               &options.DatabasePasswords,
-		"ssh_tunnel_passwords":             &options.SSHTunnelPasswords,
-		"ssh_tunnel_private_keys":          &options.SSHTunnelPrivateKeys,
-		"ssh_tunnel_private_key_passwords": &options.SSHTunnelPrivateKeyPasswords,
-	}
-	for name, target := range secrets {
-		var value types.Map
-		diags.Append(plan.GetAttribute(ctx, path.Root(name), &value)...)
-		if !value.IsNull() && !value.IsUnknown() {
-			diags.Append(value.ElementsAs(ctx, target, false)...)
-		}
-	}
-	return options, diags
 }
 
 // importedIDs reads the identifiers of the imported objects of one kind from the state.

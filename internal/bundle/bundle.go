@@ -84,6 +84,69 @@ func Load(source string, kind Kind) (*Bundle, error) {
 	return &Bundle{Content: content, Hash: hash, Objects: objects}, nil
 }
 
+// filesRoot is the top-level directory of a bundle built from files.
+const filesRoot = "bundle"
+
+// FromFiles builds a bundle of the kind from file contents keyed by their path in the export
+// layout, such as dashboards/sales.yaml or databases/warehouse.yaml. It is the same bundle that
+// Load builds from a directory holding these files: the files are zipped under one top-level
+// directory with a metadata.yaml of the kind, and a metadata.yaml among the files is ignored.
+func FromFiles(files map[string]string, kind Kind) (*Bundle, error) {
+	names := make([]string, 0, len(files))
+	layout := false
+	for name := range files {
+		if err := checkFilePath(name); err != nil {
+			return nil, err
+		}
+		if name == metadataFile {
+			continue
+		}
+		if contains(objectDirs, strings.SplitN(name, "/", 2)[0]) {
+			layout = true
+		}
+		names = append(names, name)
+	}
+	if !layout {
+		return nil, fmt.Errorf("the files hold no export layout: expected paths in a directory such as %s", strings.Join(objectDirs, ", "))
+	}
+	sort.Strings(names)
+
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	for _, name := range names {
+		if err := addFile(archive, path.Join(filesRoot, name), []byte(files[name])); err != nil {
+			return nil, err
+		}
+	}
+	metadata := fmt.Sprintf("version: 1.0.0\ntype: %s\n", kind.Type)
+	if err := addFile(archive, path.Join(filesRoot, metadataFile), []byte(metadata)); err != nil {
+		return nil, err
+	}
+	if err := archive.Close(); err != nil {
+		return nil, err
+	}
+
+	content := buffer.Bytes()
+	objects, hash, err := inspect(content, kind)
+	if err != nil {
+		return nil, err
+	}
+	return &Bundle{Content: content, Hash: hash, Objects: objects}, nil
+}
+
+// checkFilePath accepts a relative path with forward slashes that stays inside the bundle.
+func checkFilePath(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("a file of the bundle has an empty path")
+	case strings.Contains(name, "\\"):
+		return fmt.Errorf("the path %q of a bundle file must use forward slashes", name)
+	case strings.HasPrefix(name, "/") || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../"):
+		return fmt.Errorf("the path %q of a bundle file must be relative and clean, such as dashboards/sales.yaml", name)
+	}
+	return nil
+}
+
 // Objects returns the top-level objects of the kind found in bundle content.
 func Objects(content []byte, kind Kind) ([]Object, error) {
 	objects, _, err := inspect(content, kind)
