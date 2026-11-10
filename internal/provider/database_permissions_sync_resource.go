@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -66,9 +65,6 @@ func (r *databasePermissionsSyncResource) Schema(_ context.Context, _ resource.S
 				Description: "Arbitrary values whose change runs the sync again, for example the list of schemas of the source.",
 				ElementType: types.StringType,
 				Optional:    true,
-				PlanModifiers: []planmodifier.Map{
-					mapplanmodifier.RequiresReplace(),
-				},
 			},
 		},
 	}
@@ -111,13 +107,20 @@ func (r *databasePermissionsSyncResource) Read(ctx context.Context, req resource
 	}
 }
 
-// Update never runs: every change replaces the resource.
+// Update runs the sync again: only a change of triggers updates the resource in place.
 func (r *databasePermissionsSyncResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan databasePermissionsSyncResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	if err := r.client.SyncDatabasePermissions(plan.DatabaseID.ValueInt64()); err != nil {
+		resp.Diagnostics.AddError("Unable to Sync the Permissions of the Superset Database", err.Error())
+		return
+	}
+
+	plan.ID = plan.DatabaseID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
