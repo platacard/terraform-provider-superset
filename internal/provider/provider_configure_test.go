@@ -8,7 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/jarcoal/httpmock"
-	"terraform-provider-superset/internal/client"
+	"github.com/platacard/terraform-provider-superset/internal/client"
 )
 
 type testProviderConfig struct {

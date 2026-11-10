@@ -1,4 +1,4 @@
-module terraform-provider-superset
+module github.com/platacard/terraform-provider-superset
 
 go 1.25.8
 

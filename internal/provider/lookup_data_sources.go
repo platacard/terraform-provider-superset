@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"terraform-provider-superset/internal/client"
+	"github.com/platacard/terraform-provider-superset/internal/client"
 )
 
 // The lookup data sources find one object by the name a person knows it by, so a
