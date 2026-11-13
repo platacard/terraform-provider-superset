@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"math/big"
 	"net/http"
 	"regexp"
@@ -63,7 +62,7 @@ func TestReadOfAMissingObjectRemovesTheResource(t *testing.T) {
 	defer httpmock.DeactivateAndReset()
 	serveNothing()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	server := providerserver.NewProtocol6(New("test")())()
 	schemas, err := server.GetProviderSchema(ctx, &tfprotov6.GetProviderSchemaRequest{})
 	if err != nil {
@@ -90,7 +89,10 @@ func TestReadOfAMissingObjectRemovesTheResource(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			objectType := s.ValueType().(tftypes.Object)
+			objectType, ok := s.ValueType().(tftypes.Object)
+			if !ok {
+				t.Fatalf("the schema type is %T, want an object", s.ValueType())
+			}
 			values := map[string]tftypes.Value{}
 			for attr, typ := range objectType.AttributeTypes {
 				values[attr] = tftypes.NewValue(typ, nil)
