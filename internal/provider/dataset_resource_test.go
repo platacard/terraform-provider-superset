@@ -35,17 +35,23 @@ type fakeDataset struct {
 	deleted     bool
 	updates     int
 	refreshes   int
-	// legacy makes the create endpoint reject template parameters, as Superset 3.1 does.
+	// legacy makes the create endpoint reject template parameters and the update endpoint
+	// reject the fields of Superset 6, as Superset 3.1 does.
 	legacy  bool
 	creates int
+	// currencyObjects makes the metrics return their currency as an object, as Superset 6
+	// does; otherwise it is returned as the text it was given, as Superset 3.1 does.
+	currencyObjects bool
+	// last is the payload of the last update.
+	last map[string]any
 }
 
 // fakeSourceColumns are the columns Superset detects in the source table of the fake dataset.
 func fakeSourceColumns() []map[string]any {
 	return []map[string]any{
-		{"column_name": "id", "type": "INTEGER", "is_dttm": false, "groupby": true, "filterable": true},
-		{"column_name": "amount", "type": "NUMERIC(10, 2)", "is_dttm": false, "groupby": true, "filterable": true},
-		{"column_name": "day", "type": "DATE", "is_dttm": true, "groupby": true, "filterable": true},
+		{"column_name": "id", "type": "INTEGER", "is_dttm": false, "groupby": true, "filterable": true, "is_active": true},
+		{"column_name": "amount", "type": "NUMERIC(10, 2)", "is_dttm": false, "groupby": true, "filterable": true, "is_active": true},
+		{"column_name": "day", "type": "DATE", "is_dttm": true, "groupby": true, "filterable": true, "is_active": true},
 	}
 }
 
@@ -121,8 +127,20 @@ func (f *fakeDataset) serve() {
 			payload := decode(req)
 			f.mu.Lock()
 			defer f.mu.Unlock()
+			f.last = payload
+			if f.legacy {
+				for _, key := range []string{"catalog", "currency_code_column"} {
+					if _, present := payload[key]; present {
+						return httpmock.NewStringResponse(422, `{"message": {"`+key+`": ["Unknown field."]}}`), nil
+					}
+				}
+			}
 			for key, value := range payload {
 				if key == "metrics" || key == "columns" {
+					continue
+				}
+				if key == "database_id" {
+					f.dataset["database"] = value
 					continue
 				}
 				f.dataset[key] = value
@@ -179,8 +197,28 @@ func (f *fakeDataset) serve() {
 				"default_endpoint":        f.dataset["default_endpoint"],
 				"is_managed_externally":   f.dataset["is_managed_externally"],
 				"uuid":                    "dataset-uuid-123",
+				"is_sqllab_view":          f.dataset["is_sqllab_view"],
+				"offset":                  f.dataset["offset"],
+				"catalog":                 f.dataset["catalog"],
+				"currency_code_column":    f.dataset["currency_code_column"],
 				"metrics":                 f.metrics,
 				"columns":                 f.columns,
+			}
+			if f.currencyObjects {
+				metrics := make([]map[string]any, 0, len(f.metrics))
+				for _, metric := range f.metrics {
+					copied := map[string]any{}
+					for k, v := range metric {
+						copied[k] = v
+					}
+					if text, ok := metric["currency"].(string); ok && text != "" {
+						var object any
+						_ = json.Unmarshal([]byte(text), &object)
+						copied["currency"] = object
+					}
+					metrics = append(metrics, copied)
+				}
+				result["metrics"] = metrics
 			}
 			if v, ok := f.dataset["main_dttm_col"]; ok && v != nil {
 				result["main_dttm_col"] = v
@@ -278,6 +316,14 @@ func (f *fakeDataset) sent(key string) any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.dataset[key]
+}
+
+// sentKey returns the value of a key of the last update, and whether the update carried it.
+func (f *fakeDataset) sentKey(key string) (any, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	value, present := f.last[key]
+	return value, present
 }
 
 const physicalDataset = providerConfig + `
@@ -486,7 +532,7 @@ resource "superset_dataset" "test" {
 	})
 }
 
-func TestAccDatasetResourceReplacedOnDatabaseChange(t *testing.T) {
+func TestAccDatasetResourceMovedOnDatabaseChange(t *testing.T) {
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
 	fake := &fakeDataset{}
@@ -507,10 +553,19 @@ resource "superset_dataset" "test" {
 `,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("superset_dataset.test", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("superset_dataset.test", plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "MySQL Database"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_dataset.test", "database_name", "MySQL Database"),
+					resource.TestCheckResourceAttr("superset_dataset.test", "perm", "[MySQL Database].[sales](id:123)"),
+					func(*terraform.State) error {
+						if id, _ := fake.sentKey("database_id"); id != float64(2) {
+							return fmt.Errorf("database_id sent: %v, want 2", id)
+						}
+						return nil
+					},
+				),
 			},
 		},
 	})
@@ -708,7 +763,7 @@ func TestAccDatasetResourceColumns(t *testing.T) {
 				Config: physicalDataset,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("superset_dataset.test", "columns.#", "3"),
-					checkDatasetColumn("day", map[string]string{"type": "DATE", "is_dttm": "true", "groupby": "true", "filterable": "true"}),
+					checkDatasetColumn("day", map[string]string{"type": "DATE", "is_dttm": "true", "groupby": "true", "filterable": "true", "is_active": "true"}),
 					func(*terraform.State) error {
 						fake.mu.Lock()
 						defer fake.mu.Unlock()

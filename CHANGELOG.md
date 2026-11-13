@@ -1,6 +1,9 @@
 ## Unreleased
 
 IMPROVEMENTS:
+* resource/superset_dataset: New attributes `is_sqllab_view` and `offset`, and, on Superset 6, `catalog` (left to Superset when unset) and `currency_code_column`, which are only sent when set so older versions are not affected.
+* resource/superset_dataset: New `currency` attribute of a metric (the symbol and its position) and `advanced_data_type`, `extra` and `is_active` attributes of a column.
+* resource/superset_dataset: A change of `database_name` now moves the dataset to the other connection in place, keeping its id and its charts, instead of replacing it.
 * resource/superset_chart: New `dashboards` attribute with the identifiers of the dashboards the chart is linked to; when unset, the links made by the layouts of the dashboards are left as they are.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New `is_managed_externally` and `external_url` attributes. A managed object gets a banner in Superset and cannot be edited in the UI, which protects what Terraform manages; the url is the link of that banner.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New computed `uuid` attribute, the identifier of the object in export files (null for charts, dashboards and datasets on Superset 3.1, which does not return it).

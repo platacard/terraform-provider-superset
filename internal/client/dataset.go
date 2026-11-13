@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -41,10 +43,18 @@ type Dataset struct {
 	ExternalURL         string
 	// UUID is the identifier of the dataset in export files. It is only read: Superset 3.1
 	// does not return it.
-	UUID string
+	UUID         string
+	IsSQLLabView bool
+	Offset       int64
+	// Catalog and CurrencyCodeColumn exist on Superset 6 only, so they are pointers: a nil one
+	// is not written, which older versions need, and an empty one clears the field.
+	Catalog            *string
+	CurrencyCodeColumn *string
 }
 
-// DatasetMetric is a metric of a dataset, an aggregate expression over its columns.
+// DatasetMetric is a metric of a dataset, an aggregate expression over its columns. The
+// currency is a JSON object with the symbol and its position, as text: Superset 6 returns it
+// as an object, Superset 3.1 as the text it was given.
 type DatasetMetric struct {
 	ID          int64
 	Name        string
@@ -54,6 +64,7 @@ type DatasetMetric struct {
 	D3Format    string
 	WarningText string
 	MetricType  string
+	Currency    string
 }
 
 // DatasetColumn is a column of a dataset: a column of the source, or a calculated column
@@ -68,9 +79,12 @@ type DatasetColumn struct {
 	VerboseName      *string
 	Description      *string
 	PythonDateFormat *string
+	AdvancedDataType *string
+	Extra            *string
 	IsDttm           *bool
 	Groupby          *bool
 	Filterable       *bool
+	IsActive         *bool
 }
 
 // datasetMetricPayload is a metric in an update request. An entry with an id updates the
@@ -85,6 +99,7 @@ type datasetMetricPayload struct {
 	D3Format    *string `json:"d3format"`
 	WarningText *string `json:"warning_text"`
 	MetricType  *string `json:"metric_type"`
+	Currency    *string `json:"currency"`
 }
 
 // datasetCreatePayload is the body of the create request, which only accepts the fields that
@@ -105,8 +120,14 @@ type datasetCreatePayload struct {
 // datasetUpdatePayload is the body of the update request. Nullable fields are sent as null when
 // empty, so an update can clear them. The main datetime column and the owners are only sent
 // when set, because Superset fills them in on its own. Columns and metrics are left out, which
-// keeps them as they are.
+// keeps them as they are. The catalog and the currency code column are raw so they can be left
+// out, which Superset 3.1 needs, sent as null to clear them, or sent as a value.
 type datasetUpdatePayload struct {
+	DatabaseID           int64                   `json:"database_id"`
+	IsSQLLabView         bool                    `json:"is_sqllab_view"`
+	Offset               int64                   `json:"offset"`
+	Catalog              json.RawMessage         `json:"catalog,omitempty"`
+	CurrencyCodeColumn   json.RawMessage         `json:"currency_code_column,omitempty"`
 	TableName            string                  `json:"table_name"`
 	Schema               *string                 `json:"schema"`
 	SQL                  *string                 `json:"sql"`
@@ -129,6 +150,11 @@ type datasetUpdatePayload struct {
 
 func newDatasetUpdatePayload(dataset Dataset) datasetUpdatePayload {
 	return datasetUpdatePayload{
+		DatabaseID:           dataset.DatabaseID,
+		IsSQLLabView:         dataset.IsSQLLabView,
+		Offset:               dataset.Offset,
+		Catalog:              rawString(dataset.Catalog),
+		CurrencyCodeColumn:   rawString(dataset.CurrencyCodeColumn),
 		TableName:            dataset.TableName,
 		Schema:               nullIfEmpty(dataset.Schema),
 		SQL:                  nullIfEmpty(dataset.SQL),
@@ -165,6 +191,7 @@ func metricPayloads(metrics []DatasetMetric, current []DatasetMetric) []datasetM
 			D3Format:    nullIfEmpty(metric.D3Format),
 			WarningText: nullIfEmpty(metric.WarningText),
 			MetricType:  nullIfEmpty(metric.MetricType),
+			Currency:    nullIfEmpty(metric.Currency),
 		}
 		if id, ok := ids[metric.Name]; ok {
 			payload.ID = &id
@@ -193,6 +220,8 @@ func columnPayloads(columns []DatasetColumn, current []DatasetColumn) []map[stri
 			"verbose_name":       column.VerboseName,
 			"description":        column.Description,
 			"python_date_format": column.PythonDateFormat,
+			"advanced_data_type": column.AdvancedDataType,
+			"extra":              column.Extra,
 		} {
 			if value != nil {
 				payload[key] = nullIfEmpty(*value)
@@ -202,6 +231,7 @@ func columnPayloads(columns []DatasetColumn, current []DatasetColumn) []map[stri
 			"is_dttm":    column.IsDttm,
 			"groupby":    column.Groupby,
 			"filterable": column.Filterable,
+			"is_active":  column.IsActive,
 		} {
 			if value != nil {
 				payload[key] = *value
@@ -234,15 +264,20 @@ type datasetResult struct {
 	DefaultEndpoint      string      `json:"default_endpoint"`
 	IsManagedExternally  bool        `json:"is_managed_externally"`
 	UUID                 string      `json:"uuid"`
+	IsSQLLabView         bool        `json:"is_sqllab_view"`
+	Offset               looseInt    `json:"offset"`
+	Catalog              string      `json:"catalog"`
+	CurrencyCodeColumn   string      `json:"currency_code_column"`
 	Metrics              []struct {
-		ID          int64  `json:"id"`
-		Name        string `json:"metric_name"`
-		Expression  string `json:"expression"`
-		VerboseName string `json:"verbose_name"`
-		Description string `json:"description"`
-		D3Format    string `json:"d3format"`
-		WarningText string `json:"warning_text"`
-		MetricType  string `json:"metric_type"`
+		ID          int64           `json:"id"`
+		Name        string          `json:"metric_name"`
+		Expression  string          `json:"expression"`
+		VerboseName string          `json:"verbose_name"`
+		Description string          `json:"description"`
+		D3Format    string          `json:"d3format"`
+		WarningText string          `json:"warning_text"`
+		MetricType  string          `json:"metric_type"`
+		Currency    json.RawMessage `json:"currency"`
 	} `json:"metrics"`
 	Columns []struct {
 		ID               int64  `json:"id"`
@@ -252,10 +287,45 @@ type datasetResult struct {
 		VerboseName      string `json:"verbose_name"`
 		Description      string `json:"description"`
 		PythonDateFormat string `json:"python_date_format"`
+		AdvancedDataType string `json:"advanced_data_type"`
+		Extra            string `json:"extra"`
 		IsDttm           bool   `json:"is_dttm"`
 		Groupby          bool   `json:"groupby"`
 		Filterable       bool   `json:"filterable"`
+		IsActive         bool   `json:"is_active"`
 	} `json:"columns"`
+}
+
+// rawString encodes an optional string for a payload: nil is left out, an empty string is sent
+// as null and any other value as itself.
+func rawString(value *string) json.RawMessage {
+	if value == nil {
+		return nil
+	}
+	if *value == "" {
+		return json.RawMessage("null")
+	}
+	encoded, _ := json.Marshal(*value)
+	return encoded
+}
+
+// currencyText returns the currency of a metric as compact JSON text, whether Superset
+// returned it as an object or as the text it was given; an absent currency is empty.
+func currencyText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if raw[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil {
+			return text
+		}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return string(raw)
+	}
+	return compact.String()
 }
 
 func datasetPath(id int64) string {
@@ -354,6 +424,10 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 		DefaultEndpoint:      result.DefaultEndpoint,
 		IsManagedExternally:  result.IsManagedExternally,
 		UUID:                 result.UUID,
+		IsSQLLabView:         result.IsSQLLabView,
+		Offset:               result.Offset.int64(),
+		Catalog:              &result.Catalog,
+		CurrencyCodeColumn:   &result.CurrencyCodeColumn,
 		Metrics:              make([]DatasetMetric, 0, len(result.Metrics)),
 		Columns:              make([]DatasetColumn, 0, len(result.Columns)),
 	}
@@ -367,6 +441,7 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 			D3Format:    metric.D3Format,
 			WarningText: metric.WarningText,
 			MetricType:  metric.MetricType,
+			Currency:    currencyText(metric.Currency),
 		})
 	}
 	for _, column := range result.Columns {
@@ -378,9 +453,12 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 			VerboseName:      &column.VerboseName,
 			Description:      &column.Description,
 			PythonDateFormat: &column.PythonDateFormat,
+			AdvancedDataType: &column.AdvancedDataType,
+			Extra:            &column.Extra,
 			IsDttm:           &column.IsDttm,
 			Groupby:          &column.Groupby,
 			Filterable:       &column.Filterable,
+			IsActive:         &column.IsActive,
 		})
 	}
 	if dataset.DatabaseName == "" && dataset.DatabaseID != 0 {
