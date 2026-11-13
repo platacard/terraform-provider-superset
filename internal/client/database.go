@@ -151,6 +151,7 @@ func databasePath(id int64) string {
 // CreateDatabaseConnection creates a database connection and returns its id. Superset tests the
 // connection before creating it.
 func (c *Client) CreateDatabaseConnection(conn DatabaseConnection) (int64, error) {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
@@ -226,6 +227,7 @@ func (c *Client) GetDatabaseConnection(id int64) (*DatabaseConnection, error) {
 // is set, the SSH tunnel of the connection is removed: recent versions of Superset do that for a
 // null tunnel in the update, Superset 3.1 only through its own endpoint, so both are used.
 func (c *Client) UpdateDatabaseConnection(id int64, conn DatabaseConnection, removeTunnel bool) error {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
@@ -255,6 +257,7 @@ func (c *Client) UpdateDatabaseConnection(id int64, conn DatabaseConnection, rem
 // DeleteDatabaseConnection deletes a database connection; a connection that no longer exists is
 // reported as ErrNotFound.
 func (c *Client) DeleteDatabaseConnection(id int64) error {
+	defer c.forgetDatabases()
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
