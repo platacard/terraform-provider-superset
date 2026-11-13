@@ -31,7 +31,11 @@ func databaseNames(t *testing.T, c *Client) []string {
 	}
 	names := make([]string, 0, len(rows))
 	for _, row := range rows {
-		names = append(names, row["database_name"].(string))
+		name, ok := row["database_name"].(string)
+		if !ok {
+			t.Fatalf("database_name is %T, want a string", row["database_name"])
+		}
+		names = append(names, name)
 	}
 	return names
 }
