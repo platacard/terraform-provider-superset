@@ -34,6 +34,9 @@ type Chart struct {
 	// UUID is the identifier of the chart in export files. It is only read: Superset 3.1
 	// does not return it.
 	UUID string
+	// Dashboards are the ids of the dashboards the chart is placed on. A nil slice leaves them
+	// as they are in Superset; a non-nil slice, even an empty one, replaces them.
+	Dashboards []int64
 }
 
 // chartPayload is the body of the create and update requests. Nullable fields are sent as null
@@ -53,10 +56,19 @@ type chartPayload struct {
 	Owners               []int64 `json:"owners,omitempty"`
 	IsManagedExternally  bool    `json:"is_managed_externally"`
 	ExternalURL          *string `json:"external_url"`
+	// Dashboards is a pointer so an empty list is sent, which clears the dashboards, while a
+	// nil one is left out, which keeps them.
+	Dashboards *[]int64 `json:"dashboards,omitempty"`
 }
 
 func newChartPayload(chart Chart) chartPayload {
+	var dashboards *[]int64
+	if chart.Dashboards != nil {
+		ids := nonNil(chart.Dashboards)
+		dashboards = &ids
+	}
 	return chartPayload{
+		Dashboards:           dashboards,
 		Name:                 chart.Name,
 		VizType:              chart.VizType,
 		DatasourceID:         chart.DatasourceID,
@@ -90,6 +102,7 @@ type chartResult struct {
 	Tags                 []tagSummary `json:"tags"`
 	IsManagedExternally  bool         `json:"is_managed_externally"`
 	UUID                 string       `json:"uuid"`
+	Dashboards           []namedItem  `json:"dashboards"`
 }
 
 // chartDatasource is the part of a chart list row that names its datasource.
@@ -174,6 +187,7 @@ func (c *Client) GetChart(id int64) (*Chart, error) {
 		Tags:                 customTagNames(body.Result.Tags),
 		IsManagedExternally:  body.Result.IsManagedExternally,
 		UUID:                 body.Result.UUID,
+		Dashboards:           ids(body.Result.Dashboards),
 	}
 	if chart.DatasourceID == 0 {
 		if err := c.fillChartDatasource(chart); err != nil {
