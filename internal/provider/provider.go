@@ -284,6 +284,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatabaseSchemasDataSource, // Schemas of a database connection
 		NewDatabaseTablesDataSource,  // Tables of a schema
 		NewDatabaseTableDataSource,   // Columns of a table
+		NewSQLQueryDataSource,        // Rows of a SQL query run through SQL Lab
 	}
 }
 
