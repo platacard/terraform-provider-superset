@@ -1,5 +1,8 @@
 ## Unreleased
 
+FEATURES:
+* **New Data Source**: `superset_sql_query` - Run a SQL query through SQL Lab on a database connection and use its rows in the configuration, for example to create a dataset or a role per row of a table.
+
 IMPROVEMENTS:
 * resource/superset_user: New `groups` attribute, on Superset 6, with the identifiers of the groups the user is a member of; when unset, the memberships made through `superset_group` are left as they are.
 * resource/superset_group: `users` is now computed when unset: the members are left as they are, so memberships made through `superset_user.groups` are kept, where an update used to remove every member of a group configured without `users`. Set `users = []` to remove them all.
