@@ -14,15 +14,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"terraform-provider-superset/internal/bundle"
 	"terraform-provider-superset/internal/client"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource               = &importResource{}
-	_ resource.ResourceWithConfigure  = &importResource{}
-	_ resource.ResourceWithModifyPlan = &importResource{}
+	_ resource.Resource                   = &importResource{}
+	_ resource.ResourceWithConfigure      = &importResource{}
+	_ resource.ResourceWithModifyPlan     = &importResource{}
+	_ resource.ResourceWithValidateConfig = &importResource{}
 )
 
 // importKind describes one of the import resources.
@@ -90,7 +90,7 @@ func (r *importResource) Metadata(_ context.Context, req resource.MetadataReques
 func (r *importResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	secretMap := func(description string) schema.MapAttribute {
 		return schema.MapAttribute{
-			Description: description + " Keyed by the path of the database file inside the bundle, such as `databases/warehouse.yaml`.",
+			Description: description + bundleSecretDescription,
 			ElementType: types.StringType,
 			Optional:    true,
 			Sensitive:   true,
@@ -98,9 +98,10 @@ func (r *importResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 	}
 	attributes := map[string]schema.Attribute{
 		"source": schema.StringAttribute{
-			Description: "Directory in the export layout of Superset (`dashboards/`, `charts/`, `datasets/`, `databases/`), or an export zip file. A directory is bundled by the provider with a `metadata.yaml` of the right type, so one export can feed every import resource.",
-			Required:    true,
+			Description: "Directory in the export layout of Superset (`dashboards/`, `charts/`, `datasets/`, `databases/`), or an export zip file. A directory is bundled by the provider with a `metadata.yaml` of the right type, so one export can feed every import resource. Exactly one of `source` and `files` must be set.",
+			Optional:    true,
 		},
+		"files": bundleFilesAttribute(),
 		"overwrite": schema.BoolAttribute{
 			Description: "Whether objects that already exist in Superset are replaced. Without it, Superset refuses to import an object that exists. Defaults to `true`.",
 			Optional:    true,
@@ -145,15 +146,9 @@ func (r *importResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 		return
 	}
 
-	var source types.String
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("source"), &source)...)
-	if resp.Diagnostics.HasError() || source.IsUnknown() {
-		return
-	}
-
-	loaded, err := bundle.Load(source.ValueString(), r.kind.client.Bundle)
-	if err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("source"), "Unable to Load the Bundle", err.Error())
+	loaded, diags := loadConfiguredBundle(ctx, req.Config, r.kind.client.Bundle)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() || loaded == nil {
 		return
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("content_hash"), loaded.Hash)...)
@@ -165,6 +160,11 @@ func (r *importResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if priorHash.ValueString() != loaded.Hash {
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root(r.kind.idsName), types.MapUnknown(types.Int64Type))...)
 	}
+}
+
+// ValidateConfig checks that the configuration sets exactly one of source and files.
+func (r *importResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	resp.Diagnostics.Append(validateBundleAttributes(ctx, req.Config)...)
 }
 
 // Create imports the bundle and sets the initial Terraform state.
@@ -239,17 +239,19 @@ func (r *importResource) Configure(_ context.Context, req resource.ConfigureRequ
 // apply imports the bundle described by the plan, locates the imported objects and stores the
 // plan with the hash and the identifiers in the state.
 func (r *importResource) apply(ctx context.Context, plan tfsdk.Plan, state *tfsdk.State, diags *diag.Diagnostics) {
-	var source types.String
-	diags.Append(plan.GetAttribute(ctx, path.Root("source"), &source)...)
 	options, d := r.options(ctx, plan)
 	diags.Append(d...)
 	if diags.HasError() {
 		return
 	}
 
-	loaded, err := bundle.Load(source.ValueString(), r.kind.client.Bundle)
-	if err != nil {
-		diags.AddAttributeError(path.Root("source"), "Unable to Load the Bundle", err.Error())
+	loaded, d := loadConfiguredBundle(ctx, plan, r.kind.client.Bundle)
+	diags.Append(d...)
+	if diags.HasError() {
+		return
+	}
+	if loaded == nil {
+		diags.AddError("Unable to Load the Bundle", "The source or files of the bundle are not known.")
 		return
 	}
 	if err := r.client.ImportBundle(r.kind.client, loaded.Content, options); err != nil {
@@ -279,25 +281,11 @@ func (r *importResource) apply(ctx context.Context, plan tfsdk.Plan, state *tfsd
 
 // options reads the import options of the plan.
 func (r *importResource) options(ctx context.Context, plan tfsdk.Plan) (client.ImportOptions, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	var options client.ImportOptions
+	options, diags := importSecrets(ctx, plan)
 	var overwrite types.Bool
 	diags.Append(plan.GetAttribute(ctx, path.Root("overwrite"), &overwrite)...)
 	options.Overwrite = overwrite.ValueBool()
 
-	secrets := map[string]*map[string]string{
-		"database_passwords":               &options.DatabasePasswords,
-		"ssh_tunnel_passwords":             &options.SSHTunnelPasswords,
-		"ssh_tunnel_private_keys":          &options.SSHTunnelPrivateKeys,
-		"ssh_tunnel_private_key_passwords": &options.SSHTunnelPrivateKeyPasswords,
-	}
-	for name, target := range secrets {
-		var value types.Map
-		diags.Append(plan.GetAttribute(ctx, path.Root(name), &value)...)
-		if !value.IsNull() && !value.IsUnknown() {
-			diags.Append(value.ElementsAs(ctx, target, false)...)
-		}
-	}
 	if r.kind.datasets {
 		var syncColumns, syncMetrics types.Bool
 		diags.Append(plan.GetAttribute(ctx, path.Root("sync_columns"), &syncColumns)...)

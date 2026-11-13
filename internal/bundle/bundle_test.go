@@ -162,3 +162,66 @@ func TestLoadErrors(t *testing.T) {
 		t.Fatalf("an object without uuid must be refused, got %v", err)
 	}
 }
+
+func TestFromFilesMatchesADirectory(t *testing.T) {
+	files := map[string]string{
+		"metadata.yaml":                   "version: 1.0.0\ntype: Dashboard\n",
+		"dashboards/signups.yaml":         dashboardYAML,
+		"charts/daily_signups.yaml":       chartYAML,
+		"datasets/warehouse/signups.yaml": datasetYAML,
+		"databases/warehouse.yaml":        databaseYAML,
+	}
+	fromFiles, err := FromFiles(files, Dashboards)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A directory named like the top-level directory of FromFiles gives the same bundle.
+	dir := filepath.Join(t.TempDir(), filesRoot)
+	writeExport(t, dir)
+	fromDir, err := Load(dir, Dashboards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromFiles.Hash != fromDir.Hash {
+		t.Errorf("hash %s differs from the hash %s of the same files in a directory", fromFiles.Hash, fromDir.Hash)
+	}
+	if !bytes.Equal(fromFiles.Content, fromDir.Content) {
+		t.Error("the zip differs from the zip of the same files in a directory")
+	}
+	if len(fromFiles.Objects) != 1 || fromFiles.Objects[0].UUID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("unexpected objects %+v", fromFiles.Objects)
+	}
+	got := entries(t, fromFiles.Content)
+	if got["bundle/metadata.yaml"] != "version: 1.0.0\ntype: Dashboard\n" {
+		t.Errorf("unexpected metadata %q", got["bundle/metadata.yaml"])
+	}
+
+	// The same files give the same bundle every time.
+	again, err := FromFiles(files, Dashboards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(again.Content, fromFiles.Content) {
+		t.Error("the zip is not deterministic")
+	}
+}
+
+func TestFromFilesErrors(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"no layout":      {"notes/readme.yaml": "uuid: x\n"},
+		"empty":          {},
+		"absolute path":  {"/dashboards/a.yaml": dashboardYAML},
+		"parent dir":     {"../dashboards/a.yaml": dashboardYAML},
+		"unclean path":   {"dashboards/../charts/a.yaml": chartYAML},
+		"backslash path": {`dashboards\a.yaml`: dashboardYAML},
+		"empty path":     {"": dashboardYAML, "charts/a.yaml": chartYAML},
+		"no uuid":        {"dashboards/a.yaml": "dashboard_title: A\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := FromFiles(files, Dashboards); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
