@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -12,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
@@ -65,6 +68,10 @@ type datasetResourceModel struct {
 	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
 	ExternalURL          types.String `tfsdk:"external_url"`
 	UUID                 types.String `tfsdk:"uuid"`
+	IsSQLLabView         types.Bool   `tfsdk:"is_sqllab_view"`
+	Offset               types.Int64  `tfsdk:"offset"`
+	Catalog              types.String `tfsdk:"catalog"`
+	CurrencyCodeColumn   types.String `tfsdk:"currency_code_column"`
 }
 
 // datasetMetricModel maps one element of the metrics attribute.
@@ -76,6 +83,7 @@ type datasetMetricModel struct {
 	D3Format    types.String `tfsdk:"d3format"`
 	WarningText types.String `tfsdk:"warning_text"`
 	MetricType  types.String `tfsdk:"metric_type"`
+	Currency    types.String `tfsdk:"currency"`
 }
 
 var datasetMetricAttributeTypes = map[string]attr.Type{
@@ -86,6 +94,7 @@ var datasetMetricAttributeTypes = map[string]attr.Type{
 	"d3format":     types.StringType,
 	"warning_text": types.StringType,
 	"metric_type":  types.StringType,
+	"currency":     types.StringType,
 }
 
 // datasetColumnModel maps one element of the columns attribute.
@@ -96,9 +105,12 @@ type datasetColumnModel struct {
 	VerboseName      types.String `tfsdk:"verbose_name"`
 	Description      types.String `tfsdk:"description"`
 	PythonDateFormat types.String `tfsdk:"python_date_format"`
+	AdvancedDataType types.String `tfsdk:"advanced_data_type"`
+	Extra            types.String `tfsdk:"extra"`
 	IsDttm           types.Bool   `tfsdk:"is_dttm"`
 	Groupby          types.Bool   `tfsdk:"groupby"`
 	Filterable       types.Bool   `tfsdk:"filterable"`
+	IsActive         types.Bool   `tfsdk:"is_active"`
 }
 
 var datasetColumnAttributeTypes = map[string]attr.Type{
@@ -108,9 +120,12 @@ var datasetColumnAttributeTypes = map[string]attr.Type{
 	"verbose_name":       types.StringType,
 	"description":        types.StringType,
 	"python_date_format": types.StringType,
+	"advanced_data_type": types.StringType,
+	"extra":              types.StringType,
 	"is_dttm":            types.BoolType,
 	"groupby":            types.BoolType,
 	"filterable":         types.BoolType,
+	"is_active":          types.BoolType,
 }
 
 // Metadata returns the resource type name.
@@ -135,11 +150,8 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Required:    true,
 			},
 			"database_name": schema.StringAttribute{
-				Description: "Name of the database connection the dataset belongs to. Changing it replaces the dataset.",
+				Description: "Name of the database connection the dataset belongs to. Changing it moves the dataset to that connection; the dataset keeps its id and its charts.",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"schema": schema.StringAttribute{
 				Description: "Schema of the table.",
@@ -210,6 +222,30 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "URL Superset redirects to when the dataset is opened.",
 				Optional:    true,
 			},
+			"is_sqllab_view": schema.BoolAttribute{
+				Description: "Whether the dataset was saved from a SQL Lab query, which hides it from the dataset list of the UI. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"offset": schema.Int64Attribute{
+				Description: "Hours added to the timestamps of the dataset to shift its timezone. Defaults to `0`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
+			},
+			"catalog": schema.StringAttribute{
+				Description: "Catalog of the table, on Superset 6. When unset, the catalog is left to Superset, which fills in the default catalog of the connection on its own; Superset only accepts another catalog on a connection whose catalogs are enabled. Only sent when set, so older versions of Superset, which reject the field, are not affected.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"currency_code_column": schema.StringAttribute{
+				Description: "Column holding the currency code of the rows, on Superset 6. Only sent when set.",
+				Optional:    true,
+			},
 			"metrics": schema.SetNestedAttribute{
 				Description: "Metrics of the dataset. When unset, the metrics are left to Superset, which creates `count` with every dataset. When set, the dataset has exactly these metrics: declare `count` too if it should stay, and metrics not listed here are deleted.",
 				Optional:    true,
@@ -245,6 +281,10 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 						},
 						"metric_type": schema.StringAttribute{
 							Description: "Type of the aggregate, for example `sum` or `count`; informational.",
+							Optional:    true,
+						},
+						"currency": schema.StringAttribute{
+							Description: "JSON object with the currency of the metric: `symbol`, an ISO code such as `USD`, and `symbolPosition`, `prefix` or `suffix`. Formatting differences are not reported as drift.",
 							Optional:    true,
 						},
 					},
@@ -293,6 +333,18 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 						},
 						"filterable": schema.BoolAttribute{
 							Description: "Whether the column can be used in a filter. Defaults to `true` in Superset.",
+							Optional:    true,
+						},
+						"advanced_data_type": schema.StringAttribute{
+							Description: "Advanced data type of the column, for example `internet_address` or `port`, for the advanced data type filters.",
+							Optional:    true,
+						},
+						"extra": schema.StringAttribute{
+							Description: "JSON document with extra settings of the column, such as `warning_markdown` or `certification`. Formatting differences are not reported as drift.",
+							Optional:    true,
+						},
+						"is_active": schema.BoolAttribute{
+							Description: "Whether the column is active. Superset keeps an inactive column but hides it from the charts. Defaults to `true` in Superset.",
 							Optional:    true,
 						},
 					},
@@ -354,7 +406,7 @@ func (r *datasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	dataset, diags := r.datasetFromModel(ctx, plan, req.Config)
+	dataset, diags := r.datasetFromModel(ctx, plan, req.Config, datasetResourceModel{})
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -408,7 +460,7 @@ func (r *datasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	dataset, diags := r.datasetFromModel(ctx, plan, req.Config)
+	dataset, diags := r.datasetFromModel(ctx, plan, req.Config, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -484,8 +536,10 @@ func (r *datasetResource) readInto(ctx context.Context, id int64, prior datasetR
 }
 
 // datasetFromModel builds the dataset of the plan, looking the database up by its name. The
-// metrics and the columns are only part of it when the configuration sets them.
-func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel, config tfsdk.Config) (client.Dataset, diag.Diagnostics) {
+// metrics and the columns are only part of it when the configuration sets them. The fields
+// Superset 6 added are only part of it when they are set, or when the prior state had them, so
+// they get cleared.
+func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetResourceModel, config tfsdk.Config, prior datasetResourceModel) (client.Dataset, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	databaseID, err := r.client.GetDatabaseIDByName(model.DatabaseName.ValueString())
 	if err != nil {
@@ -510,6 +564,10 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 		DefaultEndpoint:      model.DefaultEndpoint.ValueString(),
 		IsManagedExternally:  model.IsManagedExternally.ValueBool(),
 		ExternalURL:          model.ExternalURL.ValueString(),
+		IsSQLLabView:         model.IsSQLLabView.ValueBool(),
+		Offset:               model.Offset.ValueInt64(),
+		Catalog:              knownString(model.Catalog),
+		CurrencyCodeColumn:   setOrCleared(model.CurrencyCodeColumn, prior.CurrencyCodeColumn),
 	}
 	if !model.Owners.IsNull() && !model.Owners.IsUnknown() {
 		diags.Append(model.Owners.ElementsAs(ctx, &dataset.Owners, false)...)
@@ -530,6 +588,7 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 				D3Format:    metric.D3Format.ValueString(),
 				WarningText: metric.WarningText.ValueString(),
 				MetricType:  metric.MetricType.ValueString(),
+				Currency:    metric.Currency.ValueString(),
 			})
 		}
 	}
@@ -547,9 +606,12 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 				VerboseName:      column.VerboseName.ValueStringPointer(),
 				Description:      column.Description.ValueStringPointer(),
 				PythonDateFormat: column.PythonDateFormat.ValueStringPointer(),
+				AdvancedDataType: column.AdvancedDataType.ValueStringPointer(),
+				Extra:            column.Extra.ValueStringPointer(),
 				IsDttm:           column.IsDttm.ValueBoolPointer(),
 				Groupby:          column.Groupby.ValueBoolPointer(),
 				Filterable:       column.Filterable.ValueBoolPointer(),
+				IsActive:         column.IsActive.ValueBoolPointer(),
 			})
 		}
 	}
@@ -562,19 +624,7 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 // supplies the cache timeout and the external url, which Superset does not return as configured.
 func datasetModel(ctx context.Context, dataset *client.Dataset, prior datasetResourceModel) (datasetResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
-	metrics := make([]datasetMetricModel, 0, len(dataset.Metrics))
-	for _, metric := range dataset.Metrics {
-		metrics = append(metrics, datasetMetricModel{
-			Name:        types.StringValue(metric.Name),
-			Expression:  types.StringValue(metric.Expression),
-			VerboseName: optionalString(metric.VerboseName),
-			Description: optionalString(metric.Description),
-			D3Format:    optionalString(metric.D3Format),
-			WarningText: optionalString(metric.WarningText),
-			MetricType:  optionalString(metric.MetricType),
-		})
-	}
-	metricsValue, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetMetricAttributeTypes}, metrics)
+	metricsValue, d := datasetMetricsValue(ctx, dataset.Metrics, prior.Metrics)
 	diags.Append(d...)
 	columnsValue, d := datasetColumnsValue(ctx, dataset.Columns, prior.Columns)
 	diags.Append(d...)
@@ -600,9 +650,83 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, prior datasetRes
 		IsManagedExternally:  types.BoolValue(dataset.IsManagedExternally),
 		ExternalURL:          prior.ExternalURL,
 		UUID:                 optionalString(dataset.UUID),
+		IsSQLLabView:         types.BoolValue(dataset.IsSQLLabView),
+		Offset:               types.Int64Value(dataset.Offset),
+		Catalog:              optionalString(*dataset.Catalog),
+		CurrencyCodeColumn:   optionalString(*dataset.CurrencyCodeColumn),
 	}
 	setDatasetPermissions(&model)
 	return model, diags
+}
+
+// datasetMetricsValue maps the metrics of a dataset to the state. The currency keeps the text
+// the configuration gave when Superset returned the same document.
+func datasetMetricsValue(ctx context.Context, metrics []client.DatasetMetric, prior types.Set) (types.Set, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	configured := map[string]datasetMetricModel{}
+	if !prior.IsNull() && !prior.IsUnknown() {
+		var elements []datasetMetricModel
+		diags.Append(prior.ElementsAs(ctx, &elements, false)...)
+		for _, element := range elements {
+			configured[element.Name.ValueString()] = element
+		}
+	}
+
+	models := make([]datasetMetricModel, 0, len(metrics))
+	for _, metric := range metrics {
+		models = append(models, datasetMetricModel{
+			Name:        types.StringValue(metric.Name),
+			Expression:  types.StringValue(metric.Expression),
+			VerboseName: optionalString(metric.VerboseName),
+			Description: optionalString(metric.Description),
+			D3Format:    optionalString(metric.D3Format),
+			WarningText: optionalString(metric.WarningText),
+			MetricType:  optionalString(metric.MetricType),
+			Currency:    sameDocument(configured[metric.Name].Currency, metric.Currency),
+		})
+	}
+	value, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetMetricAttributeTypes}, models)
+	diags.Append(d...)
+	return value, diags
+}
+
+// sameDocument returns the configured JSON text when Superset returned the same document, so
+// formatting differences do not show up as changes, and the value Superset returned otherwise.
+func sameDocument(configured types.String, value string) types.String {
+	if value == "" {
+		return types.StringNull()
+	}
+	if !configured.IsNull() && !configured.IsUnknown() {
+		var configuredDocument, document any
+		if json.Unmarshal([]byte(configured.ValueString()), &configuredDocument) == nil &&
+			json.Unmarshal([]byte(value), &document) == nil && reflect.DeepEqual(configuredDocument, document) {
+			return configured
+		}
+	}
+	return types.StringValue(value)
+}
+
+// knownString returns the planned value of a computed attribute Superset 6 added, and nil when
+// it is null or unknown, so the field is left out of the request.
+func knownString(planned types.String) *string {
+	if planned.IsNull() || planned.IsUnknown() {
+		return nil
+	}
+	return planned.ValueStringPointer()
+}
+
+// setOrCleared returns the planned value of an attribute Superset 6 added, an empty value when
+// the attribute was unset but the prior state had it, so Superset clears it, and nil when it
+// was never set, so older versions of Superset never see the field.
+func setOrCleared(planned, prior types.String) *string {
+	if !planned.IsNull() && !planned.IsUnknown() {
+		return planned.ValueStringPointer()
+	}
+	if !prior.IsNull() && !prior.IsUnknown() && prior.ValueString() != "" {
+		cleared := ""
+		return &cleared
+	}
+	return nil
 }
 
 // datasetCacheTimeout maps the cache timeout of a dataset to the state. Superset reports 0, its
@@ -638,9 +762,12 @@ func datasetColumnsValue(ctx context.Context, columns []client.DatasetColumn, pr
 			VerboseName:      optionalString(*column.VerboseName),
 			Description:      optionalString(*column.Description),
 			PythonDateFormat: optionalString(*column.PythonDateFormat),
+			AdvancedDataType: optionalString(*column.AdvancedDataType),
+			Extra:            optionalString(*column.Extra),
 			IsDttm:           types.BoolValue(*column.IsDttm),
 			Groupby:          types.BoolValue(*column.Groupby),
 			Filterable:       types.BoolValue(*column.Filterable),
+			IsActive:         types.BoolValue(*column.IsActive),
 		}
 		if element, ok := configured[column.Name]; ok {
 			model.Type = configuredString(element.Type, *column.Type)
@@ -648,9 +775,12 @@ func datasetColumnsValue(ctx context.Context, columns []client.DatasetColumn, pr
 			model.VerboseName = configuredString(element.VerboseName, *column.VerboseName)
 			model.Description = configuredString(element.Description, *column.Description)
 			model.PythonDateFormat = configuredString(element.PythonDateFormat, *column.PythonDateFormat)
+			model.AdvancedDataType = configuredString(element.AdvancedDataType, *column.AdvancedDataType)
+			model.Extra = configuredDocument(element.Extra, *column.Extra)
 			model.IsDttm = configuredBool(element.IsDttm, *column.IsDttm)
 			model.Groupby = configuredBool(element.Groupby, *column.Groupby)
 			model.Filterable = configuredBool(element.Filterable, *column.Filterable)
+			model.IsActive = configuredBool(element.IsActive, *column.IsActive)
 		}
 		models = append(models, model)
 	}
@@ -673,6 +803,15 @@ func configuredBool(configured types.Bool, value bool) types.Bool {
 		return types.BoolNull()
 	}
 	return types.BoolValue(value)
+}
+
+// configuredDocument is configuredString for a JSON document: the configured text is kept when
+// Superset returned the same document.
+func configuredDocument(configured types.String, value string) types.String {
+	if configured.IsNull() || value == "" {
+		return configuredString(configured, value)
+	}
+	return sameDocument(configured, value)
 }
 
 // setDatasetPermissions fills in the view menus of the dataset permissions.

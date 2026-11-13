@@ -24,7 +24,13 @@ resource "superset_dataset" "sales" {
   # With metrics set, the dataset has exactly these metrics; declare count to keep it.
   metrics = [
     { metric_name = "count", expression = "COUNT(*)", verbose_name = "Sales" },
-    { metric_name = "revenue", expression = "SUM(amount)", verbose_name = "Revenue", d3format = ",.2f" },
+    {
+      metric_name  = "revenue"
+      expression   = "SUM(amount)"
+      verbose_name = "Revenue"
+      d3format     = ",.2f"
+      currency     = jsonencode({ symbol = "USD", symbolPosition = "prefix" })
+    },
   ]
 }
 

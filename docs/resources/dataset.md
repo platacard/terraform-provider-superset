@@ -39,7 +39,13 @@ resource "superset_dataset" "sales" {
   # With metrics set, the dataset has exactly these metrics; declare count to keep it.
   metrics = [
     { metric_name = "count", expression = "COUNT(*)", verbose_name = "Sales" },
-    { metric_name = "revenue", expression = "SUM(amount)", verbose_name = "Revenue", d3format = ",.2f" },
+    {
+      metric_name  = "revenue"
+      expression   = "SUM(amount)"
+      verbose_name = "Revenue"
+      d3format     = ",.2f"
+      currency     = jsonencode({ symbol = "USD", symbolPosition = "prefix" })
+    },
   ]
 }
 
@@ -57,14 +63,16 @@ resource "superset_dataset" "signups_per_day" {
 
 ### Required
 
-- `database_name` (String) Name of the database connection the dataset belongs to. Changing it replaces the dataset.
+- `database_name` (String) Name of the database connection the dataset belongs to. Changing it moves the dataset to that connection; the dataset keeps its id and its charts.
 - `table_name` (String) Name of the table, or name of the virtual dataset.
 
 ### Optional
 
 - `always_filter_main_dttm` (Boolean) Whether the time range of a chart is always applied to the main datetime column, even when the chart filters another one. Defaults to `false`.
 - `cache_timeout` (Number) Duration in seconds for which the charts of the dataset are cached. Unset to use the timeout of the database.
+- `catalog` (String) Catalog of the table, on Superset 6. When unset, the catalog is left to Superset, which fills in the default catalog of the connection on its own; Superset only accepts another catalog on a connection whose catalogs are enabled. Only sent when set, so older versions of Superset, which reject the field, are not affected.
 - `columns` (Attributes Set) Columns of the dataset. When unset, the columns are left to Superset, which detects them from the source. When set, the dataset has exactly these columns, and columns not listed here are deleted. Within a column, only the attributes that are set are written, so the others keep the value Superset has, such as the detected `type`; an empty string clears an attribute. (see [below for nested schema](#nestedatt--columns))
+- `currency_code_column` (String) Column holding the currency code of the rows, on Superset 6. Only sent when set.
 - `default_endpoint` (String) URL Superset redirects to when the dataset is opened.
 - `description` (String) Free-text description of the dataset.
 - `external_url` (String) URL of the place where the dataset is managed, shown as a link in the banner of a dataset that is managed externally. Superset does not return it, so a change made in Superset is not detected.
@@ -72,9 +80,11 @@ resource "superset_dataset" "signups_per_day" {
 - `fetch_values_predicate` (String) SQL predicate applied when Superset fetches the distinct values of a column for a filter.
 - `filter_select_enabled` (Boolean) Whether filters of the dataset offer the distinct values of a column. Defaults to `true`.
 - `is_managed_externally` (Boolean) Whether the dataset is managed outside Superset, for example by Terraform. Superset then shows a banner on the dataset and disables its editing in the UI. Defaults to `false`.
+- `is_sqllab_view` (Boolean) Whether the dataset was saved from a SQL Lab query, which hides it from the dataset list of the UI. Defaults to `false`.
 - `main_dttm_col` (String) Column used as the default time column of the dataset. Superset picks the first datetime column when unset.
 - `metrics` (Attributes Set) Metrics of the dataset. When unset, the metrics are left to Superset, which creates `count` with every dataset. When set, the dataset has exactly these metrics: declare `count` too if it should stay, and metrics not listed here are deleted. (see [below for nested schema](#nestedatt--metrics))
 - `normalize_columns` (Boolean) Whether the names of the columns are normalized to lower case when they are fetched from the source. Defaults to `false`.
+- `offset` (Number) Hours added to the timestamps of the dataset to shift its timezone. Defaults to `0`.
 - `owners` (Set of Number) Identifiers of the users who own the dataset. Defaults to the user the provider authenticates as.
 - `schema` (String) Schema of the table.
 - `sql` (String) SQL query of a virtual dataset. Superset runs it when the dataset is created to detect the columns, so it must be valid at that time: Jinja templates need the `ENABLE_TEMPLATE_PROCESSING` feature flag, and on Superset 3.1, whose create endpoint does not take `template_params`, their parameters need a default such as `{{ region | default('eu') }}`.
@@ -96,10 +106,13 @@ Required:
 
 Optional:
 
+- `advanced_data_type` (String) Advanced data type of the column, for example `internet_address` or `port`, for the advanced data type filters.
 - `description` (String) Free-text description of the column.
 - `expression` (String) SQL expression of a calculated column, for example `amount * 100`.
+- `extra` (String) JSON document with extra settings of the column, such as `warning_markdown` or `certification`. Formatting differences are not reported as drift.
 - `filterable` (Boolean) Whether the column can be used in a filter. Defaults to `true` in Superset.
 - `groupby` (Boolean) Whether the column can be used as a dimension. Defaults to `true` in Superset.
+- `is_active` (Boolean) Whether the column is active. Superset keeps an inactive column but hides it from the charts. Defaults to `true` in Superset.
 - `is_dttm` (Boolean) Whether the column is a datetime column, which can be used as the time column of a chart. Superset detects it for the columns of the source.
 - `python_date_format` (String) Format of the values of a datetime column stored as text, for example `%Y-%m-%d`, or `epoch_s`.
 - `type` (String) Data type of the column, for example `NUMERIC`. Superset detects it for the columns of the source; set it for a calculated column.
@@ -116,6 +129,7 @@ Required:
 
 Optional:
 
+- `currency` (String) JSON object with the currency of the metric: `symbol`, an ISO code such as `USD`, and `symbolPosition`, `prefix` or `suffix`. Formatting differences are not reported as drift.
 - `d3format` (String) D3 format of the values, for example `,.2f`.
 - `description` (String) Free-text description of the metric.
 - `metric_type` (String) Type of the aggregate, for example `sum` or `count`; informational.
