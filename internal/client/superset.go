@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,55 @@ const databasesCacheTTL = 5 * time.Minute
 // httpClient sends the requests of every Client. It uses http.DefaultTransport, so proxy
 // settings from the environment apply.
 var httpClient = &http.Client{Timeout: RequestTimeout}
+
+// Superset limits the requests of each client address (RATELIMIT_APPLICATION, 50 per second by
+// default since Superset 4.1, and AUTH_RATE_LIMIT for the login). A request that Superset
+// answers with 429 Too Many Requests is sent again after a pause: the time that the
+// Retry-After header names, or else 1, 2, 4 and 8 seconds.
+const (
+	maxRateLimitRetries = 4
+	maxRateLimitDelay   = 30 * time.Second
+)
+
+// sleep pauses between retries. Tests replace it.
+var sleep = time.Sleep
+
+// jitter adds up to a quarter of the delay at random, so that clients that Superset limited at
+// the same moment do not all try again at the same moment. Tests replace it.
+var jitter = func(d time.Duration) time.Duration {
+	return d + time.Duration(rand.Int64N(int64(d)/4+1))
+}
+
+// doWithRetry sends the request that newRequest builds, and sends it again while Superset
+// answers 429 Too Many Requests, up to maxRateLimitRetries times. It returns the last response.
+func doWithRetry(newRequest func() (*http.Request, error)) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		req, err := newRequest()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusTooManyRequests || attempt == maxRateLimitRetries {
+			return resp, err
+		}
+		delay := jitter(rateLimitDelay(resp.Header.Get("Retry-After"), attempt))
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		sleep(delay)
+	}
+}
+
+// rateLimitDelay returns how long to wait before the next try: the seconds of a Retry-After
+// header, at most maxRateLimitDelay, or else 1 second doubled with each try.
+func rateLimitDelay(retryAfter string, attempt int) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
+		if delay := time.Duration(seconds) * time.Second; delay < maxRateLimitDelay {
+			return delay
+		}
+		return maxRateLimitDelay
+	}
+	return time.Second << attempt
+}
 
 // Client represents a client for Superset API.
 //
@@ -140,13 +191,14 @@ func (c *Client) login() error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
+	resp, err := doWithRetry(func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", url, bytes.NewReader(jsonPayload))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -199,20 +251,21 @@ func (c *Client) send(method, endpoint string, body []byte, headers map[string]s
 }
 
 func (c *Client) sendWithToken(token, method, endpoint string, body []byte, headers map[string]string, cookies []*http.Cookie) (*http.Response, error) {
-	req, err := http.NewRequest(method, fmt.Sprintf("%s%s", c.Host, endpoint), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	for _, cookie := range cookies {
-		req.AddCookie(cookie)
-	}
-
-	return httpClient.Do(req)
+	return doWithRetry(func() (*http.Request, error) {
+		req, err := http.NewRequest(method, fmt.Sprintf("%s%s", c.Host, endpoint), bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		return req, nil
+	})
 }
 
 // marshalPayload serializes a request payload to JSON; a nil payload produces an empty body.
