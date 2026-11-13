@@ -2,6 +2,7 @@
 
 FEATURES:
 * **New Resource**: `superset_sql_execution` - Run a SQL statement through SQL Lab on a database connection when the resource is created and whenever its triggers change, with an optional statement for its destruction, for example to create a view and drop it again.
+* **New Data Source**: `superset_current_user` - The user the provider is authenticated as, on Superset 6, with its id for the `owners` of the objects it creates and the names of its roles.
 * **New Data Source**: `superset_sql_query` - Run a SQL query through SQL Lab on a database connection and use its rows in the configuration, for example to create a dataset or a role per row of a table.
 
 IMPROVEMENTS:
