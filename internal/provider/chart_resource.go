@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
@@ -53,6 +54,9 @@ type chartResourceModel struct {
 	CertificationDetails types.String `tfsdk:"certification_details"`
 	Owners               types.Set    `tfsdk:"owners"`
 	Tags                 types.Set    `tfsdk:"tags"`
+	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
+	ExternalURL          types.String `tfsdk:"external_url"`
+	UUID                 types.String `tfsdk:"uuid"`
 }
 
 // Metadata returns the resource type name.
@@ -139,6 +143,23 @@ func (r *chartResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					setplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"is_managed_externally": schema.BoolAttribute{
+				Description: "Whether the chart is managed outside Superset, for example by Terraform. Superset then shows a banner on the chart and disables its editing in the UI. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"external_url": schema.StringAttribute{
+				Description: "URL of the place where the chart is managed, shown as a link in the banner of a chart that is managed externally. Superset does not return it, so a change made in Superset is not detected.",
+				Optional:    true,
+			},
+			"uuid": schema.StringAttribute{
+				Description: "UUID of the chart, the identifier used in export files. Superset 3.1 does not return it, so it is null there.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
 }
@@ -164,7 +185,7 @@ func (r *chartResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	resp.Diagnostics.Append(r.applyTags(ctx, id, plan.Tags, types.SetNull(types.StringType))...)
-	r.readInto(ctx, id, &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Creation")
+	r.readInto(ctx, id, plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Creation")
 }
 
 // Read refreshes the Terraform state with the chart as it is in Superset.
@@ -186,7 +207,7 @@ func (r *chartResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
-	model, diags := chartModel(ctx, chart)
+	model, diags := chartModel(ctx, chart, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -216,7 +237,7 @@ func (r *chartResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	resp.Diagnostics.Append(r.applyTags(ctx, state.ID.ValueInt64(), plan.Tags, state.Tags)...)
 
-	r.readInto(ctx, state.ID.ValueInt64(), &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Update")
+	r.readInto(ctx, state.ID.ValueInt64(), plan, &resp.State, &resp.Diagnostics, "Unable to Read Superset Chart After Update")
 }
 
 // Delete deletes the chart; a chart that is already gone is not an error.
@@ -287,15 +308,16 @@ func (r *chartResource) applyTags(ctx context.Context, id int64, planned, prior 
 }
 
 // readInto fetches the chart and stores it in the state after a create or an update, so the
-// state carries the values Superset computed, such as the default owners.
-func (r *chartResource) readInto(ctx context.Context, id int64, state stateSetter, diags *diag.Diagnostics, summary string) {
+// state carries the values Superset computed, such as the default owners. The plan supplies
+// the values Superset does not return.
+func (r *chartResource) readInto(ctx context.Context, id int64, plan chartResourceModel, state stateSetter, diags *diag.Diagnostics, summary string) {
 	chart, err := r.client.GetChart(id)
 	if err != nil {
 		diags.AddError(summary, err.Error())
 		return
 	}
 
-	model, d := chartModel(ctx, chart)
+	model, d := chartModel(ctx, chart, plan)
 	diags.Append(d...)
 	if diags.HasError() {
 		return
@@ -315,6 +337,8 @@ func chartFromModel(ctx context.Context, model chartResourceModel) (client.Chart
 		CacheTimeout:         model.CacheTimeout.ValueInt64Pointer(),
 		CertifiedBy:          model.CertifiedBy.ValueString(),
 		CertificationDetails: model.CertificationDetails.ValueString(),
+		IsManagedExternally:  model.IsManagedExternally.ValueBool(),
+		ExternalURL:          model.ExternalURL.ValueString(),
 	}
 
 	var diags diag.Diagnostics
@@ -324,7 +348,9 @@ func chartFromModel(ctx context.Context, model chartResourceModel) (client.Chart
 	return chart, diags
 }
 
-func chartModel(ctx context.Context, chart *client.Chart) (chartResourceModel, diag.Diagnostics) {
+// chartModel maps a chart to the state. The external url, which Superset does not return, is
+// taken from the prior model.
+func chartModel(ctx context.Context, chart *client.Chart, prior chartResourceModel) (chartResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, chart.Owners)
 	tags, d := types.SetValueFrom(ctx, types.StringType, nonNilStrings(chart.Tags))
 	diags.Append(d...)
@@ -342,6 +368,9 @@ func chartModel(ctx context.Context, chart *client.Chart) (chartResourceModel, d
 		CertificationDetails: optionalString(chart.CertificationDetails),
 		Owners:               owners,
 		Tags:                 tags,
+		IsManagedExternally:  types.BoolValue(chart.IsManagedExternally),
+		ExternalURL:          prior.ExternalURL,
+		UUID:                 optionalString(chart.UUID),
 	}
 	return model, diags
 }

@@ -78,9 +78,11 @@ resource "superset_database" "analytics" {
 - `db_pass` (String, Sensitive) Password of the connection. It is inserted into the URI as is, so percent-encode special characters or use `sqlalchemy_uri`.
 - `db_port` (Number) Port of the database server.
 - `db_user` (String) Username of the connection.
+- `external_url` (String) URL of the place where the connection is managed, shown as a link in the banner of a connection that is managed externally. Superset does not return it, so a change made in Superset is not detected.
 - `extra` (String) JSON document with the extra configuration of the connection, such as `engine_params`, `metadata_params` or `schemas_allowed_for_file_upload`. Defaults to `{"client_encoding": "utf8"}` when the connection is created without it.
 - `force_ctas_schema` (String) Schema in which `CREATE TABLE AS` creates its tables when the query does not name one.
 - `impersonate_user` (Boolean) Whether queries run as the logged-in user instead of the user of the connection. Defaults to `false`.
+- `is_managed_externally` (Boolean) Whether the connection is managed outside Superset, for example by Terraform. Superset then shows a banner on the connection and disables its editing in the UI. Defaults to `false`.
 - `masked_encrypted_extra` (String, Sensitive) JSON document with the encrypted extra configuration of the connection, such as the credentials of BigQuery or Google Sheets. Superset masks it in its responses, so changes made in the UI are not detected.
 - `server_cert` (String) CA bundle, in PEM format, used to validate the certificate of the database server.
 - `sqlalchemy_uri` (String, Sensitive) Full SQLAlchemy URI of the connection, for engines whose URI does not fit the parts, for example `awsathena+rest://...` or `trino://...`. Conflicts with the parts. Changes made to the URI in the Superset UI are not detected, because Superset masks the password in the URI it returns.
@@ -89,6 +91,7 @@ resource "superset_database" "analytics" {
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the database connection.
+- `uuid` (String) UUID of the connection, the identifier used in export files.
 
 <a id="nestedatt--ssh_tunnel"></a>
 ### Nested Schema for `ssh_tunnel`

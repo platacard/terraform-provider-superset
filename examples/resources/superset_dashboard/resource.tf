@@ -4,6 +4,10 @@ resource "superset_dashboard" "signups" {
   published = true
   roles     = [superset_role.analysts.id]
 
+  # Managed externally: Superset shows a banner on the dashboard and disables its editing in the UI.
+  is_managed_externally = true
+  external_url          = "https://git.example.com/analytics/blob/main/superset/dashboards.tf"
+
   json_metadata = jsonencode({
     refresh_frequency = 300
     color_scheme      = "supersetColors"

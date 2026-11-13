@@ -19,6 +19,10 @@ resource "superset_dashboard" "signups" {
   published = true
   roles     = [superset_role.analysts.id]
 
+  # Managed externally: Superset shows a banner on the dashboard and disables its editing in the UI.
+  is_managed_externally = true
+  external_url          = "https://git.example.com/analytics/blob/main/superset/dashboards.tf"
+
   json_metadata = jsonencode({
     refresh_frequency = 300
     color_scheme      = "supersetColors"
@@ -59,6 +63,8 @@ resource "superset_dashboard" "signups" {
 - `certification_details` (String) Details of the certification.
 - `certified_by` (String) Person or group that certified the dashboard.
 - `css` (String) CSS applied to the dashboard.
+- `external_url` (String) URL of the place where the dashboard is managed, shown as a link in the banner of a dashboard that is managed externally. Superset does not return it, so a change made in Superset is not detected.
+- `is_managed_externally` (Boolean) Whether the dashboard is managed outside Superset, for example by Terraform. Superset then shows a banner on the dashboard and disables its editing in the UI. Defaults to `false`.
 - `json_metadata` (String) JSON document with the settings of the dashboard, such as `refresh_frequency`, `color_scheme` or `native_filter_configuration`. Only the keys set here are managed: keys Superset adds or that are changed in the UI keep their value and are not reported as drift. When unset, the settings are left to Superset.
 - `owners` (Set of Number) Identifiers of the users who own the dashboard. Defaults to the user the provider authenticates as.
 - `position_json` (String) JSON document with the layout of the dashboard. The charts referenced by its `CHART` elements are linked to the dashboard. Superset adds the `uuid` of each chart to the layout, which is not reported as drift. When unset, the layout is left to Superset.
@@ -71,6 +77,7 @@ resource "superset_dashboard" "signups" {
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the dashboard.
+- `uuid` (String) UUID of the dashboard, the identifier used in export files and by the embedded SDK. Superset 3.1 does not return it, so it is null there.
 
 ## Import
 

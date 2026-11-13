@@ -26,6 +26,14 @@ type Chart struct {
 	// Tags are the names of the tags people attached to the object; the owner, type and
 	// favorite relations Superset keeps as tags are left out.
 	Tags []string
+	// IsManagedExternally marks the chart as managed outside Superset, which shows a banner
+	// and disables its editing in the UI; ExternalURL is the link of that banner. Superset
+	// accepts the URL but never returns it.
+	IsManagedExternally bool
+	ExternalURL         string
+	// UUID is the identifier of the chart in export files. It is only read: Superset 3.1
+	// does not return it.
+	UUID string
 }
 
 // chartPayload is the body of the create and update requests. Nullable fields are sent as null
@@ -43,6 +51,8 @@ type chartPayload struct {
 	CertifiedBy          *string `json:"certified_by"`
 	CertificationDetails *string `json:"certification_details"`
 	Owners               []int64 `json:"owners,omitempty"`
+	IsManagedExternally  bool    `json:"is_managed_externally"`
+	ExternalURL          *string `json:"external_url"`
 }
 
 func newChartPayload(chart Chart) chartPayload {
@@ -58,6 +68,8 @@ func newChartPayload(chart Chart) chartPayload {
 		CertifiedBy:          nullIfEmpty(chart.CertifiedBy),
 		CertificationDetails: nullIfEmpty(chart.CertificationDetails),
 		Owners:               chart.Owners,
+		IsManagedExternally:  chart.IsManagedExternally,
+		ExternalURL:          nullIfEmpty(chart.ExternalURL),
 	}
 }
 
@@ -76,6 +88,8 @@ type chartResult struct {
 	CertificationDetails string       `json:"certification_details"`
 	Owners               []namedItem  `json:"owners"`
 	Tags                 []tagSummary `json:"tags"`
+	IsManagedExternally  bool         `json:"is_managed_externally"`
+	UUID                 string       `json:"uuid"`
 }
 
 // chartDatasource is the part of a chart list row that names its datasource.
@@ -158,6 +172,8 @@ func (c *Client) GetChart(id int64) (*Chart, error) {
 		CertificationDetails: body.Result.CertificationDetails,
 		Owners:               ids(body.Result.Owners),
 		Tags:                 customTagNames(body.Result.Tags),
+		IsManagedExternally:  body.Result.IsManagedExternally,
+		UUID:                 body.Result.UUID,
 	}
 	if chart.DatasourceID == 0 {
 		if err := c.fillChartDatasource(chart); err != nil {

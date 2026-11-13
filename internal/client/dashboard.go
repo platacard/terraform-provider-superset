@@ -30,6 +30,14 @@ type Dashboard struct {
 	// as null when ClearTheme is set, since older versions do not know the field.
 	ThemeID    *int64
 	ClearTheme bool
+	// IsManagedExternally marks the dashboard as managed outside Superset, which shows a
+	// banner and disables its editing in the UI; ExternalURL is the link of that banner.
+	// Superset accepts the URL but never returns it.
+	IsManagedExternally bool
+	ExternalURL         string
+	// UUID is the identifier of the dashboard in export files and for the embedded SDK. It
+	// is only read: Superset 3.1 does not return it.
+	UUID string
 }
 
 // dashboardPayload is the body of the create and update requests. The create endpoint rejects a
@@ -49,6 +57,8 @@ type dashboardPayload struct {
 	Owners               []int64 `json:"owners,omitempty"`
 	Roles                []int64 `json:"roles"`
 	ThemeID              *int64  `json:"theme_id,omitempty"`
+	IsManagedExternally  bool    `json:"is_managed_externally"`
+	ExternalURL          *string `json:"external_url"`
 	clearTheme           bool
 }
 
@@ -80,6 +90,8 @@ func newDashboardPayload(dashboard Dashboard, metadata string) dashboardPayload 
 		CertificationDetails: nullIfEmpty(dashboard.CertificationDetails),
 		Owners:               dashboard.Owners,
 		Roles:                nonNil(dashboard.Roles),
+		IsManagedExternally:  dashboard.IsManagedExternally,
+		ExternalURL:          nullIfEmpty(dashboard.ExternalURL),
 	}
 }
 
@@ -129,6 +141,8 @@ type dashboardResult struct {
 	Theme                *struct {
 		ID int64 `json:"id"`
 	} `json:"theme"`
+	IsManagedExternally bool   `json:"is_managed_externally"`
+	UUID                string `json:"uuid"`
 }
 
 func dashboardPath(id int64) string {
@@ -192,6 +206,8 @@ func (c *Client) GetDashboard(id int64) (*Dashboard, error) {
 		Owners:               ids(body.Result.Owners),
 		Roles:                ids(body.Result.Roles),
 		Tags:                 customTagNames(body.Result.Tags),
+		IsManagedExternally:  body.Result.IsManagedExternally,
+		UUID:                 body.Result.UUID,
 	}
 	if body.Result.Theme != nil {
 		dashboard.ThemeID = &body.Result.Theme.ID
