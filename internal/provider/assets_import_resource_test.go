@@ -4,10 +4,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -205,14 +209,35 @@ func TestAccAssetsImportResource(t *testing.T) {
 				Check:  imports(2),
 			},
 			{
-				// A chart deleted outside Terraform imports the bundle again.
+				// A chart deleted outside Terraform marks the content hash as outdated. The state
+				// keeps the identifiers, so that a destroy would still delete the other objects.
 				PreConfig: func() {
 					fake.mu.Lock()
 					fake.deleted["chart"] = true
 					fake.mu.Unlock()
 				},
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_assets_import.test", "content_hash", outdatedContentHash),
+					resource.TestCheckResourceAttr("superset_assets_import.test", "dashboard_ids.%", "1"),
+					resource.TestCheckResourceAttr("superset_assets_import.test", "dataset_ids.%", "1"),
+				),
+			},
+			{
+				// The plan imports the bundle again, and plans the real hash as a known value, so
+				// that tools which ignore unknown planned values see the change too.
 				Config: assetsImportConfig(dir, ""),
-				Check:  imports(3),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("superset_assets_import.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue("superset_assets_import.test", tfjsonpath.New("content_hash"), knownvalue.StringRegexp(regexp.MustCompile(`^[0-9a-f]{64}$`))),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					imports(3),
+					resource.TestCheckResourceAttr("superset_assets_import.test", "chart_ids.%", "1"),
+				),
 			},
 			{
 				Config: assetsImportConfig(dir, `  sparse = true`),

@@ -133,8 +133,8 @@ func (r *assetsImportResource) Create(ctx context.Context, req resource.CreateRe
 	r.apply(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
-// Read checks that the imported objects still exist. A missing object clears the content hash,
-// so the next plan imports the bundle again.
+// Read checks that the imported objects still exist. A missing object marks the content hash as
+// outdated, so the next plan imports the bundle again.
 func (r *assetsImportResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	for _, kind := range assetKinds {
 		ids, diags := importedIDs(ctx, req.State, kind.idsName)
@@ -150,7 +150,7 @@ func (r *assetsImportResource) Read(ctx context.Context, req resource.ReadReques
 			}
 			if !exists {
 				tflog.Warn(ctx, "an imported object no longer exists in Superset, the bundle will be imported again", map[string]any{"kind": kind.client.Path, "uuid": uuid, "id": id})
-				resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("content_hash"), types.StringNull())...)
+				resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("content_hash"), outdatedContentHash)...)
 				return
 			}
 		}

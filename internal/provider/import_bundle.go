@@ -127,3 +127,9 @@ func databaseFileKey(key string) string {
 	}
 	return "databases/" + key
 }
+
+// outdatedContentHash replaces the content hash of an import in the state when one of its
+// imported objects no longer exists in Superset. It differs from every real hash, so the next
+// plan imports the bundle again. The hash is not cleared, and the identifiers of the other objects
+// stay, so that the resource still counts as created and a destroy still deletes them.
+const outdatedContentHash = "outdated"
