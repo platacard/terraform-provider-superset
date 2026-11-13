@@ -16,8 +16,9 @@ import (
 // fakeSQLLab serves the SQL Lab execute endpoint of the fake Superset host and keeps the last
 // request body. A query on the table nosuch fails the way Superset reports it.
 type fakeSQLLab struct {
-	mu   sync.Mutex
-	last map[string]any
+	mu         sync.Mutex
+	last       map[string]any
+	executions []string
 }
 
 func (f *fakeSQLLab) serve() {
@@ -30,10 +31,11 @@ func (f *fakeSQLLab) serve() {
 			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 				return httpmock.NewStringResponse(400, err.Error()), nil
 			}
+			sql, _ := payload["sql"].(string)
 			f.mu.Lock()
 			f.last = payload
+			f.executions = append(f.executions, sql)
 			f.mu.Unlock()
-			sql, _ := payload["sql"].(string)
 			if regexp.MustCompile(`nosuch`).MatchString(sql) {
 				return httpmock.NewStringResponse(500, `{"errors": [{"message": "postgresql error: relation \"nosuch\" does not exist\n", "error_type": "GENERIC_DB_ENGINE_ERROR", "level": "error", "extra": {}}]}`), nil
 			}
@@ -54,6 +56,13 @@ func (f *fakeSQLLab) sent(key string) any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.last[key]
+}
+
+// executed returns the statements run so far.
+func (f *fakeSQLLab) executed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.executions...)
 }
 
 func TestAccSQLQueryDataSource(t *testing.T) {
