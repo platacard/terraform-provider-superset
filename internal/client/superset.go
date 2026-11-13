@@ -479,7 +479,7 @@ func (c *Client) DeleteRole(id int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body
-		return responseError("delete role", resp, body)
+		return objectError("delete role", resp, body)
 	}
 
 	return nil
@@ -695,7 +695,7 @@ func (c *Client) DeleteDatabase(databaseID int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return responseError("delete database", resp, body)
+		return objectError("delete database", resp, body)
 	}
 
 	return nil
@@ -1198,7 +1198,7 @@ func (c *Client) DeleteUser(id int64) error {
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return responseError("delete user", resp, body)
+		return objectError("delete user", resp, body)
 	}
 
 	return nil

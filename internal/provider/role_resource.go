@@ -203,7 +203,7 @@ func (r *roleResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	err := r.client.DeleteRole(state.ID.ValueInt64())
 	if err != nil {
-		if err.Error() == "failed to delete role, status code: 404" {
+		if errors.Is(err, client.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			tflog.Debug(ctx, fmt.Sprintf("Role ID %d not found, removing from state", state.ID.ValueInt64()))
 			return

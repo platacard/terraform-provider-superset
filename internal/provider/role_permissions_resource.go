@@ -416,6 +416,10 @@ func (r *rolePermissionsResource) Delete(ctx context.Context, req resource.Delet
 	})
 
 	roleID, err := r.client.GetRoleIDByName(state.RoleName.ValueString())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "role no longer exists in Superset, so it has no permissions to clear", map[string]any{"role_name": state.RoleName.ValueString()})
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error finding role",

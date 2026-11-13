@@ -288,7 +288,7 @@ func (r *userResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	err := r.client.DeleteUser(state.ID.ValueInt64())
 	if err != nil {
-		if err.Error() == "failed to delete user, status code: 404" {
+		if errors.Is(err, client.ErrNotFound) {
 			resp.State.RemoveResource(ctx)
 			tflog.Debug(ctx, fmt.Sprintf("User ID %d not found, removing from state", state.ID.ValueInt64()))
 			return
