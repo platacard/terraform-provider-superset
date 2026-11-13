@@ -1075,6 +1075,9 @@ type User struct {
 	Email     string  `json:"email"`
 	Active    bool    `json:"active"`
 	Roles     []int64 `json:"roles,omitempty"`
+	// Groups are the ids of the groups the user is a member of, on Superset 6. They are nil
+	// when Superset does not return them, which older versions do not.
+	Groups []int64 `json:"groups,omitempty"`
 }
 
 // rawUserModel represents a raw user model in the Superset client.
@@ -1089,6 +1092,7 @@ type rawUserModel struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
 	} `json:"roles"`
+	Groups []namedItem `json:"groups"`
 }
 
 // FetchUsers returns every user of the Superset instance.
@@ -1143,13 +1147,18 @@ func (c *Client) GetUser(id int64) (*User, error) {
 	for i, role := range result.Result.Roles {
 		user.Roles[i] = role.ID
 	}
+	if result.Result.Groups != nil {
+		user.Groups = ids(result.Result.Groups)
+	}
 
 	return user, nil
 }
 
 // CreateUser creates a user with the specified parameters in the Superset application.
-// It returns the ID of the created user and any error encountered.
-func (c *Client) CreateUser(username, firstName, lastName, email, password string, active bool, roles []int64) (int64, error) {
+// It returns the ID of the created user and any error encountered. The groups are only sent
+// when not nil: Superset 6 makes the user a member of exactly these groups, and older
+// versions reject the field.
+func (c *Client) CreateUser(username, firstName, lastName, email, password string, active bool, roles []int64, groups []int64) (int64, error) {
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return 0, err
@@ -1164,6 +1173,9 @@ func (c *Client) CreateUser(username, firstName, lastName, email, password strin
 		"password":   password,
 		"active":     active,
 		"roles":      roles,
+	}
+	if groups != nil {
+		payload["groups"] = groups
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("POST", endpoint, payload, headers, cookies)
@@ -1196,7 +1208,8 @@ func (c *Client) CreateUser(username, firstName, lastName, email, password strin
 // The updated user data is sent to the Superset API using a PUT request.
 // If the update is successful, the function returns nil.
 // If the update fails, an error is returned with the corresponding status code and response body.
-func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, password string, active bool, roles []int64) error {
+// The groups are only sent when not nil, which keeps the memberships of the user otherwise.
+func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, password string, active bool, roles []int64, groups []int64) error {
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
@@ -1215,6 +1228,9 @@ func (c *Client) UpdateUser(id int64, username, firstName, lastName, email, pass
 	// Only include password if it's not empty
 	if password != "" {
 		payload["password"] = password
+	}
+	if groups != nil {
+		payload["groups"] = groups
 	}
 
 	resp, err := c.DoRequestWithHeadersAndCookies("PUT", endpoint, payload, headers, cookies)

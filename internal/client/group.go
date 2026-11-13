@@ -14,28 +14,35 @@ type Group struct {
 	Label       string
 	Description string
 	Roles       []int64
-	Users       []int64
+	// Users are the ids of the members. A nil slice leaves the members as they are, which
+	// keeps the memberships the users set themselves; an empty one removes every member.
+	Users []int64
 }
 
 // groupPayload is the body of the create and update requests. The nullable fields are sent as
-// null when empty, so an update can clear them; the roles and users are always sent, so an
-// update can revoke them.
+// null when empty, so an update can clear them; the roles are always sent, so an update can
+// revoke them. Users is a pointer so an empty list is sent, which removes the members, while
+// a nil one is left out, which keeps them.
 type groupPayload struct {
-	Name        string  `json:"name"`
-	Label       *string `json:"label"`
-	Description *string `json:"description"`
-	Roles       []int64 `json:"roles"`
-	Users       []int64 `json:"users"`
+	Name        string   `json:"name"`
+	Label       *string  `json:"label"`
+	Description *string  `json:"description"`
+	Roles       []int64  `json:"roles"`
+	Users       *[]int64 `json:"users,omitempty"`
 }
 
 func newGroupPayload(group Group) groupPayload {
-	return groupPayload{
+	payload := groupPayload{
 		Name:        group.Name,
 		Label:       nullIfEmpty(group.Label),
 		Description: nullIfEmpty(group.Description),
 		Roles:       nonNil(group.Roles),
-		Users:       nonNil(group.Users),
 	}
+	if group.Users != nil {
+		users := nonNil(group.Users)
+		payload.Users = &users
+	}
+	return payload
 }
 
 type groupResult struct {
@@ -94,7 +101,7 @@ func (c *Client) GetGroup(id int64) (*Group, error) {
 	}, nil
 }
 
-// UpdateGroup replaces the attributes, roles and members of a group.
+// UpdateGroup replaces the attributes and roles of a group, and its members when they are set.
 func (c *Client) UpdateGroup(id int64, group Group) error {
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
