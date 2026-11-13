@@ -17,13 +17,16 @@ import (
 // fakeChart serves the chart endpoints of the fake Superset host for one chart with id 7. Like
 // Superset 3.1 it leaves the datasource out of the single-chart response and only reports it in
 // the list, and like recent versions it returns the cache timeout as a string. Params are
-// returned re-encoded, so the resource must compare them as documents.
+// returned re-encoded, so the resource must compare them as documents. The dashboards of the
+// chart are replaced by a request that carries them and kept by one that does not.
 type fakeChart struct {
 	mu      sync.Mutex
 	chart   map[string]any
 	deleted bool
 	// tags, when set, lists the tags of the chart the way the tagging system does.
 	tags *fakeTags
+	// dashboardsSent reports whether the last create or update request carried the dashboards.
+	dashboardsSent bool
 }
 
 func (f *fakeChart) serve() {
@@ -36,6 +39,10 @@ func (f *fakeChart) serve() {
 		var payload map[string]any
 		if err := json.NewDecoder(req.Body).Decode(&payload); err == nil {
 			f.mu.Lock()
+			_, f.dashboardsSent = payload["dashboards"]
+			if !f.dashboardsSent && f.chart != nil {
+				payload["dashboards"] = f.chart["dashboards"]
+			}
 			f.chart, f.deleted = payload, false
 			f.mu.Unlock()
 		}
@@ -88,6 +95,14 @@ func (f *fakeChart) serve() {
 				"owners":                owners,
 				"is_managed_externally": f.chart["is_managed_externally"],
 				"uuid":                  "chart-uuid-7",
+				"dashboards":            []map[string]any{},
+			}
+			if linked, ok := f.chart["dashboards"].([]any); ok {
+				dashboards := make([]map[string]any, 0, len(linked))
+				for _, id := range linked {
+					dashboards = append(dashboards, map[string]any{"id": id, "dashboard_title": "Dashboard"})
+				}
+				result["dashboards"] = dashboards
 			}
 			if f.tags != nil {
 				result["tags"] = f.tags.summaries(2, 7)
@@ -123,6 +138,25 @@ func (f *fakeChart) sent(key string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.chart[key] != nil
+}
+
+// link links the chart to the given dashboards, as the layout of a dashboard does.
+func (f *fakeChart) link(ids ...float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	linked := make([]any, 0, len(ids))
+	for _, id := range ids {
+		linked = append(linked, id)
+	}
+	f.chart["dashboards"] = linked
+}
+
+// sentDashboards reports whether the last request carried the dashboards, and which.
+func (f *fakeChart) sentDashboards() (bool, []any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	linked, _ := f.chart["dashboards"].([]any)
+	return f.dashboardsSent, linked
 }
 
 func TestAccChartResource(t *testing.T) {

@@ -16,3 +16,13 @@ resource "superset_chart" "daily_signups" {
     time_range = "Last month"
   })
 }
+
+# A chart linked to a dashboard from its own side, for a dashboard whose layout Terraform does
+# not manage; a dashboard managed with a position_json links its charts itself.
+resource "superset_chart" "signups_total" {
+  name          = "Signups total"
+  datasource_id = superset_dataset.signups.id
+  viz_type      = "big_number_total"
+  params        = jsonencode({ viz_type = "big_number_total", metric = "count" })
+  dashboards    = [data.superset_dashboard.overview.id]
+}

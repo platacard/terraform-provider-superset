@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -57,6 +58,7 @@ type chartResourceModel struct {
 	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
 	ExternalURL          types.String `tfsdk:"external_url"`
 	UUID                 types.String `tfsdk:"uuid"`
+	Dashboards           types.Set    `tfsdk:"dashboards"`
 }
 
 // Metadata returns the resource type name.
@@ -67,7 +69,7 @@ func (r *chartResource) Metadata(_ context.Context, req resource.MetadataRequest
 // Schema defines the schema for the resource.
 func (r *chartResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a chart. Place a chart on a dashboard through the `position_json` of the dashboard.",
+		Description: "Manages a chart. A chart is placed on a dashboard through the `position_json` of the dashboard, which lays it out, or through its own `dashboards`, which only links it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Description: "Numeric identifier of the chart.",
@@ -143,6 +145,15 @@ func (r *chartResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					setplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"dashboards": schema.SetAttribute{
+				Description: "Identifiers of the dashboards the chart is linked to. When unset, the links are left as they are, as made by the `position_json` of the dashboards; when set, the chart is linked to exactly these dashboards. A linked chart without a place in the layout of the dashboard is listed on the dashboard but not shown, so manage the link from one side only.",
+				ElementType: types.Int64Type,
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"is_managed_externally": schema.BoolAttribute{
 				Description: "Whether the chart is managed outside Superset, for example by Terraform. Superset then shows a banner on the chart and disables its editing in the UI. Defaults to `false`.",
 				Optional:    true,
@@ -172,7 +183,7 @@ func (r *chartResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	chart, diags := chartFromModel(ctx, plan)
+	chart, diags := chartFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -224,7 +235,7 @@ func (r *chartResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	chart, diags := chartFromModel(ctx, plan)
+	chart, diags := chartFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -325,7 +336,9 @@ func (r *chartResource) readInto(ctx context.Context, id int64, plan chartResour
 	diags.Append(state.Set(ctx, &model)...)
 }
 
-func chartFromModel(ctx context.Context, model chartResourceModel) (client.Chart, diag.Diagnostics) {
+// chartFromModel builds the chart of the plan. The dashboards are only part of it when the
+// configuration sets them: the plan carries the ones of the state otherwise.
+func chartFromModel(ctx context.Context, model chartResourceModel, config tfsdk.Config) (client.Chart, diag.Diagnostics) {
 	chart := client.Chart{
 		Name:                 model.Name.ValueString(),
 		VizType:              model.VizType.ValueString(),
@@ -345,6 +358,12 @@ func chartFromModel(ctx context.Context, model chartResourceModel) (client.Chart
 	if !model.Owners.IsNull() && !model.Owners.IsUnknown() {
 		diags.Append(model.Owners.ElementsAs(ctx, &chart.Owners, false)...)
 	}
+	var configured types.Set
+	diags.Append(config.GetAttribute(ctx, path.Root("dashboards"), &configured)...)
+	if !configured.IsNull() && !model.Dashboards.IsUnknown() {
+		chart.Dashboards = []int64{}
+		diags.Append(model.Dashboards.ElementsAs(ctx, &chart.Dashboards, false)...)
+	}
 	return chart, diags
 }
 
@@ -354,7 +373,10 @@ func chartModel(ctx context.Context, chart *client.Chart, prior chartResourceMod
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, chart.Owners)
 	tags, d := types.SetValueFrom(ctx, types.StringType, nonNilStrings(chart.Tags))
 	diags.Append(d...)
+	dashboards, d := types.SetValueFrom(ctx, types.Int64Type, nonNilIDs(chart.Dashboards))
+	diags.Append(d...)
 	model := chartResourceModel{
+		Dashboards:           dashboards,
 		ID:                   types.Int64Value(chart.ID),
 		Name:                 types.StringValue(chart.Name),
 		DatasourceID:         types.Int64Value(chart.DatasourceID),

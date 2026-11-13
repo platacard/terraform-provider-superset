@@ -1,6 +1,7 @@
 ## Unreleased
 
 IMPROVEMENTS:
+* resource/superset_chart: New `dashboards` attribute with the identifiers of the dashboards the chart is linked to; when unset, the links made by the layouts of the dashboards are left as they are.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New `is_managed_externally` and `external_url` attributes. A managed object gets a banner in Superset and cannot be edited in the UI, which protects what Terraform manages; the url is the link of that banner.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New computed `uuid` attribute, the identifier of the object in export files (null for charts, dashboards and datasets on Superset 3.1, which does not return it).
 
