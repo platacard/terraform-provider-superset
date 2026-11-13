@@ -52,6 +52,9 @@ type dashboardResourceModel struct {
 	Roles                types.Set    `tfsdk:"roles"`
 	Tags                 types.Set    `tfsdk:"tags"`
 	ThemeID              types.Int64  `tfsdk:"theme_id"`
+	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
+	ExternalURL          types.String `tfsdk:"external_url"`
+	UUID                 types.String `tfsdk:"uuid"`
 }
 
 // stateSetter is the part of a state that stores a model.
@@ -145,6 +148,23 @@ func (r *dashboardResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				PlanModifiers: []planmodifier.Set{
 					setplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"is_managed_externally": schema.BoolAttribute{
+				Description: "Whether the dashboard is managed outside Superset, for example by Terraform. Superset then shows a banner on the dashboard and disables its editing in the UI. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"external_url": schema.StringAttribute{
+				Description: "URL of the place where the dashboard is managed, shown as a link in the banner of a dashboard that is managed externally. Superset does not return it, so a change made in Superset is not detected.",
+				Optional:    true,
+			},
+			"uuid": schema.StringAttribute{
+				Description: "UUID of the dashboard, the identifier used in export files and by the embedded SDK. Superset 3.1 does not return it, so it is null there.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 		},
@@ -326,6 +346,8 @@ func dashboardFromModel(ctx context.Context, model dashboardResourceModel) (clie
 		CertifiedBy:          model.CertifiedBy.ValueString(),
 		CertificationDetails: model.CertificationDetails.ValueString(),
 		ThemeID:              model.ThemeID.ValueInt64Pointer(),
+		IsManagedExternally:  model.IsManagedExternally.ValueBool(),
+		ExternalURL:          model.ExternalURL.ValueString(),
 	}
 
 	var diags diag.Diagnostics
@@ -339,7 +361,8 @@ func dashboardFromModel(ctx context.Context, model dashboardResourceModel) (clie
 }
 
 // dashboardModel maps a dashboard to the state. Roles stay null when the dashboard has none and
-// the prior model has none either, so a configuration without roles does not drift.
+// the prior model has none either, so a configuration without roles does not drift. The external
+// url, which Superset does not return, is taken from the prior model.
 func dashboardModel(ctx context.Context, dashboard *client.Dashboard, prior dashboardResourceModel) (dashboardResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dashboard.Owners)
 	tags, d := types.SetValueFrom(ctx, types.StringType, nonNilStrings(dashboard.Tags))
@@ -365,6 +388,9 @@ func dashboardModel(ctx context.Context, dashboard *client.Dashboard, prior dash
 		Roles:                roles,
 		Tags:                 tags,
 		ThemeID:              types.Int64PointerValue(dashboard.ThemeID),
+		IsManagedExternally:  types.BoolValue(dashboard.IsManagedExternally),
+		ExternalURL:          prior.ExternalURL,
+		UUID:                 optionalString(dashboard.UUID),
 	}
 	return model, diags
 }

@@ -29,6 +29,13 @@ type DatabaseConnection struct {
 	MaskedEncryptedExtra string
 	ServerCert           string
 	SSHTunnel            *SSHTunnel
+	// IsManagedExternally marks the connection as managed outside Superset, which shows a
+	// banner and disables its editing in the UI; ExternalURL is the link of that banner.
+	// Superset accepts the URL but never returns it.
+	IsManagedExternally bool
+	ExternalURL         string
+	// UUID is the identifier of the connection in export files. It is only read.
+	UUID string
 }
 
 // ConnectionParameters are the parts of the URI that Superset reports for engines it can parse;
@@ -70,6 +77,8 @@ type databasePayload struct {
 	MaskedEncryptedExtra *string           `json:"masked_encrypted_extra"`
 	ServerCert           *string           `json:"server_cert"`
 	SSHTunnel            *sshTunnelPayload `json:"ssh_tunnel"`
+	IsManagedExternally  bool              `json:"is_managed_externally"`
+	ExternalURL          *string           `json:"external_url"`
 }
 
 type sshTunnelPayload struct {
@@ -97,6 +106,8 @@ func newDatabasePayload(conn DatabaseConnection) databasePayload {
 		Extra:                conn.Extra,
 		MaskedEncryptedExtra: nullIfEmpty(conn.MaskedEncryptedExtra),
 		ServerCert:           nullIfEmpty(conn.ServerCert),
+		IsManagedExternally:  conn.IsManagedExternally,
+		ExternalURL:          nullIfEmpty(conn.ExternalURL),
 	}
 	if tunnel := conn.SSHTunnel; tunnel != nil {
 		payload.SSHTunnel = &sshTunnelPayload{
@@ -142,6 +153,8 @@ type databaseResult struct {
 		ServerPort    looseInt `json:"server_port"`
 		Username      string   `json:"username"`
 	} `json:"ssh_tunnel"`
+	IsManagedExternally bool   `json:"is_managed_externally"`
+	UUID                string `json:"uuid"`
 }
 
 func databasePath(id int64) string {
@@ -212,6 +225,8 @@ func (c *Client) GetDatabaseConnection(id int64) (*DatabaseConnection, error) {
 		Extra:                result.Extra,
 		MaskedEncryptedExtra: result.MaskedEncryptedExtra,
 		ServerCert:           result.ServerCert,
+		IsManagedExternally:  result.IsManagedExternally,
+		UUID:                 result.UUID,
 	}
 	if tunnel := result.SSHTunnel; tunnel != nil {
 		conn.SSHTunnel = &SSHTunnel{

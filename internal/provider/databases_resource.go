@@ -67,6 +67,9 @@ type databaseResourceModel struct {
 	MaskedEncryptedExtra types.String `tfsdk:"masked_encrypted_extra"`
 	ServerCert           types.String `tfsdk:"server_cert"`
 	SSHTunnel            types.Object `tfsdk:"ssh_tunnel"`
+	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
+	ExternalURL          types.String `tfsdk:"external_url"`
+	UUID                 types.String `tfsdk:"uuid"`
 }
 
 // sshTunnelModel maps the ssh_tunnel attribute.
@@ -235,6 +238,23 @@ func (r *databaseResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 						Optional:    true,
 						Sensitive:   true,
 					},
+				},
+			},
+			"is_managed_externally": schema.BoolAttribute{
+				Description: "Whether the connection is managed outside Superset, for example by Terraform. Superset then shows a banner on the connection and disables its editing in the UI. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"external_url": schema.StringAttribute{
+				Description: "URL of the place where the connection is managed, shown as a link in the banner of a connection that is managed externally. Superset does not return it, so a change made in Superset is not detected.",
+				Optional:    true,
+			},
+			"uuid": schema.StringAttribute{
+				Description: "UUID of the connection, the identifier used in export files.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 		},
@@ -437,6 +457,8 @@ func connectionFromModel(ctx context.Context, model databaseResourceModel) (clie
 		Extra:                model.Extra.ValueString(),
 		MaskedEncryptedExtra: model.MaskedEncryptedExtra.ValueString(),
 		ServerCert:           model.ServerCert.ValueString(),
+		IsManagedExternally:  model.IsManagedExternally.ValueBool(),
+		ExternalURL:          model.ExternalURL.ValueString(),
 	}
 	if model.SQLAlchemyURI.IsNull() {
 		conn.SQLAlchemyURI = fmt.Sprintf("%s://%s:%s@%s:%d/%s", model.DBEngine.ValueString(), model.DBUser.ValueString(),
@@ -462,7 +484,8 @@ func connectionFromModel(ctx context.Context, model databaseResourceModel) (clie
 // databaseConnectionModel maps a connection to the state. Secrets, which Superset masks, are taken from
 // the prior model: the password of the connection, the encrypted extra and the secrets of the
 // tunnel. A connection configured as a URI keeps its URI, because the masked URI Superset
-// returns cannot be compared with it.
+// returns cannot be compared with it. The external url, which Superset does not return, is
+// taken from the prior model as well.
 func databaseConnectionModel(ctx context.Context, conn *client.DatabaseConnection, prior databaseResourceModel) (databaseResourceModel, diag.Diagnostics) {
 	model := databaseResourceModel{
 		ID:                   types.Int64Value(conn.ID),
@@ -481,6 +504,9 @@ func databaseConnectionModel(ctx context.Context, conn *client.DatabaseConnectio
 		MaskedEncryptedExtra: prior.MaskedEncryptedExtra,
 		ServerCert:           optionalString(conn.ServerCert),
 		SSHTunnel:            types.ObjectNull(sshTunnelAttributeTypes),
+		IsManagedExternally:  types.BoolValue(conn.IsManagedExternally),
+		ExternalURL:          prior.ExternalURL,
+		UUID:                 optionalString(conn.UUID),
 	}
 	if conn.MaskedEncryptedExtra == "" {
 		model.MaskedEncryptedExtra = types.StringNull()

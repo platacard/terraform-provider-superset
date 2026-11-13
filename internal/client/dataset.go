@@ -34,6 +34,14 @@ type Dataset struct {
 	// Columns are the columns of the dataset, with the same rule: nil leaves them alone, a
 	// non-nil slice replaces them.
 	Columns []DatasetColumn
+	// IsManagedExternally marks the dataset as managed outside Superset, which shows a banner
+	// and disables its editing in the UI; ExternalURL is the link of that banner. Superset
+	// accepts the URL but never returns it.
+	IsManagedExternally bool
+	ExternalURL         string
+	// UUID is the identifier of the dataset in export files. It is only read: Superset 3.1
+	// does not return it.
+	UUID string
 }
 
 // DatasetMetric is a metric of a dataset, an aggregate expression over its columns.
@@ -113,6 +121,8 @@ type datasetUpdatePayload struct {
 	NormalizeColumns     bool                    `json:"normalize_columns"`
 	AlwaysFilterMainDttm bool                    `json:"always_filter_main_dttm"`
 	DefaultEndpoint      *string                 `json:"default_endpoint"`
+	IsManagedExternally  bool                    `json:"is_managed_externally"`
+	ExternalURL          *string                 `json:"external_url"`
 	Metrics              *[]datasetMetricPayload `json:"metrics,omitempty"`
 	Columns              *[]map[string]any       `json:"columns,omitempty"`
 }
@@ -133,6 +143,8 @@ func newDatasetUpdatePayload(dataset Dataset) datasetUpdatePayload {
 		NormalizeColumns:     dataset.NormalizeColumns,
 		AlwaysFilterMainDttm: dataset.AlwaysFilterMainDttm,
 		DefaultEndpoint:      nullIfEmpty(dataset.DefaultEndpoint),
+		IsManagedExternally:  dataset.IsManagedExternally,
+		ExternalURL:          nullIfEmpty(dataset.ExternalURL),
 	}
 }
 
@@ -220,6 +232,8 @@ type datasetResult struct {
 	NormalizeColumns     bool        `json:"normalize_columns"`
 	AlwaysFilterMainDttm bool        `json:"always_filter_main_dttm"`
 	DefaultEndpoint      string      `json:"default_endpoint"`
+	IsManagedExternally  bool        `json:"is_managed_externally"`
+	UUID                 string      `json:"uuid"`
 	Metrics              []struct {
 		ID          int64  `json:"id"`
 		Name        string `json:"metric_name"`
@@ -338,6 +352,8 @@ func (c *Client) GetDataset(id int64) (*Dataset, error) {
 		NormalizeColumns:     result.NormalizeColumns,
 		AlwaysFilterMainDttm: result.AlwaysFilterMainDttm,
 		DefaultEndpoint:      result.DefaultEndpoint,
+		IsManagedExternally:  result.IsManagedExternally,
+		UUID:                 result.UUID,
 		Metrics:              make([]DatasetMetric, 0, len(result.Metrics)),
 		Columns:              make([]DatasetColumn, 0, len(result.Columns)),
 	}

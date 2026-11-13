@@ -67,9 +67,11 @@ resource "superset_dataset" "signups_per_day" {
 - `columns` (Attributes Set) Columns of the dataset. When unset, the columns are left to Superset, which detects them from the source. When set, the dataset has exactly these columns, and columns not listed here are deleted. Within a column, only the attributes that are set are written, so the others keep the value Superset has, such as the detected `type`; an empty string clears an attribute. (see [below for nested schema](#nestedatt--columns))
 - `default_endpoint` (String) URL Superset redirects to when the dataset is opened.
 - `description` (String) Free-text description of the dataset.
+- `external_url` (String) URL of the place where the dataset is managed, shown as a link in the banner of a dataset that is managed externally. Superset does not return it, so a change made in Superset is not detected.
 - `extra` (String) JSON document with extra settings of the dataset, such as `certification` or `warning_markdown`.
 - `fetch_values_predicate` (String) SQL predicate applied when Superset fetches the distinct values of a column for a filter.
 - `filter_select_enabled` (Boolean) Whether filters of the dataset offer the distinct values of a column. Defaults to `true`.
+- `is_managed_externally` (Boolean) Whether the dataset is managed outside Superset, for example by Terraform. Superset then shows a banner on the dataset and disables its editing in the UI. Defaults to `false`.
 - `main_dttm_col` (String) Column used as the default time column of the dataset. Superset picks the first datetime column when unset.
 - `metrics` (Attributes Set) Metrics of the dataset. When unset, the metrics are left to Superset, which creates `count` with every dataset. When set, the dataset has exactly these metrics: declare `count` too if it should stay, and metrics not listed here are deleted. (see [below for nested schema](#nestedatt--metrics))
 - `normalize_columns` (Boolean) Whether the names of the columns are normalized to lower case when they are fetched from the source. Defaults to `false`.
@@ -83,6 +85,7 @@ resource "superset_dataset" "signups_per_day" {
 - `id` (Number) Numeric identifier of the dataset.
 - `perm` (String) View menu of the `datasource_access` permission of the dataset, `[<database>].[<table>](id:<id>)`, for `superset_role_permissions`.
 - `schema_perm` (String) View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.
+- `uuid` (String) UUID of the dataset, the identifier used in export files. Superset 3.1 does not return it, so it is null there.
 
 <a id="nestedatt--columns"></a>
 ### Nested Schema for `columns`

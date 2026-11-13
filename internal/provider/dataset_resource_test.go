@@ -177,6 +177,8 @@ func (f *fakeDataset) serve() {
 				"normalize_columns":       f.dataset["normalize_columns"],
 				"always_filter_main_dttm": f.dataset["always_filter_main_dttm"],
 				"default_endpoint":        f.dataset["default_endpoint"],
+				"is_managed_externally":   f.dataset["is_managed_externally"],
+				"uuid":                    "dataset-uuid-123",
 				"metrics":                 f.metrics,
 				"columns":                 f.columns,
 			}

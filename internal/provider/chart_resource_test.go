@@ -86,6 +86,8 @@ func (f *fakeChart) serve() {
 				"certified_by":          f.chart["certified_by"],
 				"certification_details": f.chart["certification_details"],
 				"owners":                owners,
+				"is_managed_externally": f.chart["is_managed_externally"],
+				"uuid":                  "chart-uuid-7",
 			}
 			if f.tags != nil {
 				result["tags"] = f.tags.summaries(2, 7)

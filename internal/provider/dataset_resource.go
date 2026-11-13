@@ -62,6 +62,9 @@ type datasetResourceModel struct {
 	Columns              types.Set    `tfsdk:"columns"`
 	Perm                 types.String `tfsdk:"perm"`
 	SchemaPerm           types.String `tfsdk:"schema_perm"`
+	IsManagedExternally  types.Bool   `tfsdk:"is_managed_externally"`
+	ExternalURL          types.String `tfsdk:"external_url"`
+	UUID                 types.String `tfsdk:"uuid"`
 }
 
 // datasetMetricModel maps one element of the metrics attribute.
@@ -303,6 +306,23 @@ func (r *datasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "View menu of the `schema_access` permission of the schema of the dataset, `[<database>].[<schema>]`; null without a schema.",
 				Computed:    true,
 			},
+			"is_managed_externally": schema.BoolAttribute{
+				Description: "Whether the dataset is managed outside Superset, for example by Terraform. Superset then shows a banner on the dataset and disables its editing in the UI. Defaults to `false`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"external_url": schema.StringAttribute{
+				Description: "URL of the place where the dataset is managed, shown as a link in the banner of a dataset that is managed externally. Superset does not return it, so a change made in Superset is not detected.",
+				Optional:    true,
+			},
+			"uuid": schema.StringAttribute{
+				Description: "UUID of the dataset, the identifier used in export files. Superset 3.1 does not return it, so it is null there.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
 }
@@ -371,7 +391,7 @@ func (r *datasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	model, diags := datasetModel(ctx, dataset, state.Columns, state.CacheTimeout)
+	model, diags := datasetModel(ctx, dataset, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -455,7 +475,7 @@ func (r *datasetResource) readInto(ctx context.Context, id int64, prior datasetR
 		return
 	}
 
-	model, d := datasetModel(ctx, dataset, prior.Columns, prior.CacheTimeout)
+	model, d := datasetModel(ctx, dataset, prior)
 	diags.Append(d...)
 	if diags.HasError() {
 		return
@@ -488,6 +508,8 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 		NormalizeColumns:     model.NormalizeColumns.ValueBool(),
 		AlwaysFilterMainDttm: model.AlwaysFilterMainDttm.ValueBool(),
 		DefaultEndpoint:      model.DefaultEndpoint.ValueString(),
+		IsManagedExternally:  model.IsManagedExternally.ValueBool(),
+		ExternalURL:          model.ExternalURL.ValueString(),
 	}
 	if !model.Owners.IsNull() && !model.Owners.IsUnknown() {
 		diags.Append(model.Owners.ElementsAs(ctx, &dataset.Owners, false)...)
@@ -535,11 +557,10 @@ func (r *datasetResource) datasetFromModel(ctx context.Context, model datasetRes
 }
 
 // datasetModel maps a dataset to the state, with the view menus of its permissions. The prior
-// columns, from the plan or the state, tell which attributes of a column the configuration
-// sets: the others stay null, so the values Superset keeps do not show up as changes.
-// datasetModel maps a dataset to the state. priorColumns and priorCacheTimeout are the values of
-// the plan or the prior state.
-func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns types.Set, priorCacheTimeout types.Int64) (datasetResourceModel, diag.Diagnostics) {
+// model, the plan or the prior state, tells which attributes of a column the configuration
+// sets, so the others stay null and the values Superset keeps do not show up as changes; it also
+// supplies the cache timeout and the external url, which Superset does not return as configured.
+func datasetModel(ctx context.Context, dataset *client.Dataset, prior datasetResourceModel) (datasetResourceModel, diag.Diagnostics) {
 	owners, diags := types.SetValueFrom(ctx, types.Int64Type, dataset.Owners)
 	metrics := make([]datasetMetricModel, 0, len(dataset.Metrics))
 	for _, metric := range dataset.Metrics {
@@ -555,7 +576,7 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns typ
 	}
 	metricsValue, d := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: datasetMetricAttributeTypes}, metrics)
 	diags.Append(d...)
-	columnsValue, d := datasetColumnsValue(ctx, dataset.Columns, priorColumns)
+	columnsValue, d := datasetColumnsValue(ctx, dataset.Columns, prior.Columns)
 	diags.Append(d...)
 	model := datasetResourceModel{
 		ID:                   types.Int64Value(dataset.ID),
@@ -565,7 +586,7 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns typ
 		SQL:                  optionalString(dataset.SQL),
 		Description:          optionalString(dataset.Description),
 		Owners:               owners,
-		CacheTimeout:         datasetCacheTimeout(dataset.CacheTimeout, priorCacheTimeout),
+		CacheTimeout:         datasetCacheTimeout(dataset.CacheTimeout, prior.CacheTimeout),
 		MainDttmCol:          optionalString(dataset.MainDttmCol),
 		TemplateParams:       jsonDocument.value(dataset.TemplateParams),
 		Extra:                jsonDocument.value(dataset.Extra),
@@ -576,6 +597,9 @@ func datasetModel(ctx context.Context, dataset *client.Dataset, priorColumns typ
 		DefaultEndpoint:      optionalString(dataset.DefaultEndpoint),
 		Metrics:              metricsValue,
 		Columns:              columnsValue,
+		IsManagedExternally:  types.BoolValue(dataset.IsManagedExternally),
+		ExternalURL:          prior.ExternalURL,
+		UUID:                 optionalString(dataset.UUID),
 	}
 	setDatasetPermissions(&model)
 	return model, diags

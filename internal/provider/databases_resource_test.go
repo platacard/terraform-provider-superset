@@ -66,9 +66,10 @@ func (f *fakeDatabase) serve() {
 			}
 			result := map[string]any{"id": 208}
 			for _, key := range []string{"database_name", "expose_in_sqllab", "allow_ctas", "allow_cvas", "allow_dml", "allow_run_async",
-				"allow_file_upload", "impersonate_user", "cache_timeout", "force_ctas_schema", "extra", "server_cert"} {
+				"allow_file_upload", "impersonate_user", "cache_timeout", "force_ctas_schema", "extra", "server_cert", "is_managed_externally"} {
 				result[key] = f.conn[key]
 			}
+			result["uuid"] = "database-uuid-208"
 			if f.conn["masked_encrypted_extra"] != nil {
 				result["masked_encrypted_extra"] = `{"token": "` + mask + `"}`
 			}

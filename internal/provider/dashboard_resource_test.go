@@ -15,8 +15,9 @@ import (
 
 // fakeDashboard serves the dashboard endpoints of the fake Superset host for one dashboard with
 // id 3. Like Superset, a create stores the documents verbatim without linking any chart, while an
-// update links the charts found in the positions of the metadata, re-encodes the layout with the
-// uuid of each chart, and completes the metadata with defaults.
+// update with a metadata document links the charts found in its positions, re-encodes the layout
+// with the uuid of each chart, and completes the metadata with defaults; an update with an empty
+// metadata leaves it alone.
 type fakeDashboard struct {
 	mu        sync.Mutex
 	dashboard map[string]any
@@ -58,10 +59,12 @@ func (f *fakeDashboard) serve() {
 			defer f.mu.Unlock()
 			f.dashboard = payload
 			metadata := map[string]any{}
-			if text, _ := payload["json_metadata"].(string); text != "" {
-				if err := json.Unmarshal([]byte(text), &metadata); err != nil {
-					return httpmock.NewStringResponse(400, `{"message": {"json_metadata": ["Not a valid JSON document"]}}`), nil
-				}
+			text, _ := payload["json_metadata"].(string)
+			if text == "" {
+				return httpmock.NewStringResponse(200, `{"id": 3}`), nil
+			}
+			if err := json.Unmarshal([]byte(text), &metadata); err != nil {
+				return httpmock.NewStringResponse(400, `{"message": {"json_metadata": ["Not a valid JSON document"]}}`), nil
 			}
 			if positions, ok := metadata["positions"].(map[string]any); ok {
 				f.charts = nil
@@ -119,6 +122,8 @@ func (f *fakeDashboard) serve() {
 				"certification_details": f.dashboard["certification_details"],
 				"owners":                owners,
 				"roles":                 roles,
+				"is_managed_externally": f.dashboard["is_managed_externally"],
+				"uuid":                  "dashboard-uuid-3",
 			}
 			if f.tags != nil {
 				result["tags"] = f.tags.summaries(3, 3)
@@ -132,6 +137,13 @@ func (f *fakeDashboard) serve() {
 			f.deleted = true
 			return httpmock.NewStringResponse(200, `{"message": "OK"}`), nil
 		})
+}
+
+// sent returns the value of a key of the last create or update request.
+func (f *fakeDashboard) sent(key string) any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dashboard[key]
 }
 
 // linked returns the ids of the charts linked to the dashboard by the last update.

@@ -20,6 +20,10 @@ resource "superset_chart" "daily_signups" {
   description   = "Signups per day over the last month"
   cache_timeout = 300
 
+  # Managed externally: Superset shows a banner on the chart and disables its editing in the UI.
+  is_managed_externally = true
+  external_url          = "https://git.example.com/analytics/blob/main/superset/charts.tf"
+
   params = jsonencode({
     viz_type   = "echarts_timeseries_line"
     x_axis     = "day"
@@ -46,6 +50,8 @@ resource "superset_chart" "daily_signups" {
 - `certified_by` (String) Person or group that certified the chart.
 - `datasource_type` (String) Type of the datasource: `table` (a dataset, the default), `query`, `saved_query` or `view`.
 - `description` (String) Free-text description of the chart.
+- `external_url` (String) URL of the place where the chart is managed, shown as a link in the banner of a chart that is managed externally. Superset does not return it, so a change made in Superset is not detected.
+- `is_managed_externally` (Boolean) Whether the chart is managed outside Superset, for example by Terraform. Superset then shows a banner on the chart and disables its editing in the UI. Defaults to `false`.
 - `owners` (Set of Number) Identifiers of the users who own the chart. Defaults to the user the provider authenticates as.
 - `query_context` (String) JSON document with the query context of the chart, which Superset uses for alerts, reports and cache warm-up. When unset, the query context Superset generates on its own is left alone.
 - `tags` (Set of String) Names of the tags attached to the chart, with the `TAGGING_SYSTEM` feature flag. When unset, the tags are left as they are; when set, the chart has exactly these tags. Tags that do not exist yet are created, and stay when the chart is destroyed.
@@ -53,6 +59,7 @@ resource "superset_chart" "daily_signups" {
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the chart.
+- `uuid` (String) UUID of the chart, the identifier used in export files. Superset 3.1 does not return it, so it is null there.
 
 ## Import
 
