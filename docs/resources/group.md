@@ -38,7 +38,7 @@ resource "superset_group" "finance" {
 - `description` (String) Free-text description of the group.
 - `label` (String) Label shown instead of the name.
 - `roles` (Set of Number) Identifiers of the roles the members of the group get, for example from `superset_role`.
-- `users` (Set of Number) Identifiers of the members of the group, for example from `superset_user`.
+- `users` (Set of Number) Identifiers of the members of the group, for example from `superset_user`. When unset, the members are left as they are, as made by the `groups` of the users; when set, the group has exactly these members, and `[]` removes them all. Manage a membership from one side only, here or in `superset_user`.
 
 ### Read-Only
 

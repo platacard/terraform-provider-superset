@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -79,9 +81,13 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Optional:    true,
 			},
 			"users": schema.SetAttribute{
-				Description: "Identifiers of the members of the group, for example from `superset_user`.",
+				Description: "Identifiers of the members of the group, for example from `superset_user`. When unset, the members are left as they are, as made by the `groups` of the users; when set, the group has exactly these members, and `[]` removes them all. Manage a membership from one side only, here or in `superset_user`.",
 				ElementType: types.Int64Type,
 				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -95,7 +101,7 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	group, diags := groupFromModel(ctx, plan)
+	group, diags := groupFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -137,7 +143,7 @@ func (r *groupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
 
-// Update replaces the attributes, roles and members of the group.
+// Update replaces the attributes and roles of the group, and its members when they are configured.
 func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state groupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -146,7 +152,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	group, diags := groupFromModel(ctx, plan)
+	group, diags := groupFromModel(ctx, plan, req.Config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -219,7 +225,9 @@ func (r *groupResource) readInto(ctx context.Context, id int64, prior groupResou
 	diags.Append(state.Set(ctx, &model)...)
 }
 
-func groupFromModel(ctx context.Context, model groupResourceModel) (client.Group, diag.Diagnostics) {
+// groupFromModel builds the group of the plan. The users are only part of it when the
+// configuration sets them: the plan carries the ones of the state otherwise.
+func groupFromModel(ctx context.Context, model groupResourceModel, config tfsdk.Config) (client.Group, diag.Diagnostics) {
 	group := client.Group{
 		Name:        model.Name.ValueString(),
 		Label:       model.Label.ValueString(),
@@ -229,30 +237,34 @@ func groupFromModel(ctx context.Context, model groupResourceModel) (client.Group
 	if !model.Roles.IsNull() && !model.Roles.IsUnknown() {
 		diags.Append(model.Roles.ElementsAs(ctx, &group.Roles, false)...)
 	}
-	if !model.Users.IsNull() && !model.Users.IsUnknown() {
+	var configured types.Set
+	diags.Append(config.GetAttribute(ctx, path.Root("users"), &configured)...)
+	if !configured.IsNull() && !model.Users.IsUnknown() {
+		group.Users = []int64{}
 		diags.Append(model.Users.ElementsAs(ctx, &group.Users, false)...)
 	}
 	return group, diags
 }
 
-// groupModel maps a group to the state. Empty roles and users stay null when the prior model
-// has none either, so a configuration without them does not drift.
+// groupModel maps a group to the state. Empty roles stay null when the prior model has none
+// either, so a configuration without them does not drift; the users are always the members
+// Superset reports, since the attribute is computed when unset.
 func groupModel(ctx context.Context, group *client.Group, prior groupResourceModel) (groupResourceModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
-	idSet := func(values []int64, priorValue types.Set) types.Set {
-		if len(values) == 0 && priorValue.IsNull() {
-			return types.SetNull(types.Int64Type)
-		}
-		value, d := types.SetValueFrom(ctx, types.Int64Type, nonNilIDs(values))
+	roles := types.SetNull(types.Int64Type)
+	if len(group.Roles) > 0 || !prior.Roles.IsNull() {
+		var d diag.Diagnostics
+		roles, d = types.SetValueFrom(ctx, types.Int64Type, nonNilIDs(group.Roles))
 		diags.Append(d...)
-		return value
 	}
+	users, d := types.SetValueFrom(ctx, types.Int64Type, nonNilIDs(group.Users))
+	diags.Append(d...)
 	return groupResourceModel{
 		ID:          types.Int64Value(group.ID),
 		Name:        types.StringValue(group.Name),
 		Label:       optionalString(group.Label),
 		Description: optionalString(group.Description),
-		Roles:       idSet(group.Roles, prior.Roles),
-		Users:       idSet(group.Users, prior.Users),
+		Roles:       roles,
+		Users:       users,
 	}, diags
 }

@@ -1,6 +1,8 @@
 ## Unreleased
 
 IMPROVEMENTS:
+* resource/superset_user: New `groups` attribute, on Superset 6, with the identifiers of the groups the user is a member of; when unset, the memberships made through `superset_group` are left as they are.
+* resource/superset_group: `users` is now computed when unset: the members are left as they are, so memberships made through `superset_user.groups` are kept, where an update used to remove every member of a group configured without `users`. Set `users = []` to remove them all.
 * resource/superset_dataset: New attributes `is_sqllab_view` and `offset`, and, on Superset 6, `catalog` (left to Superset when unset) and `currency_code_column`, which are only sent when set so older versions are not affected.
 * resource/superset_dataset: New `currency` attribute of a metric (the symbol and its position) and `advanced_data_type`, `extra` and `is_active` attributes of a column.
 * resource/superset_dataset: A change of `database_name` now moves the dataset to the other connection in place, keeping its id and its charts, instead of replacing it.

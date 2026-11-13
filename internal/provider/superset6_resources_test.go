@@ -311,7 +311,8 @@ resource "superset_group" "test" {
 				ImportStateVerify: true,
 			},
 			{
-				// Removing the optional attributes clears them and revokes the roles and members.
+				// Removing the optional attributes clears them and revokes the roles; the members
+				// are left as they are, since the memberships may be managed from the user side.
 				Config: providerConfig + `
 resource "superset_group" "test" {
   name = "finance-team"
@@ -321,6 +322,7 @@ resource "superset_group" "test" {
 					resource.TestCheckResourceAttr("superset_group.test", "name", "finance-team"),
 					resource.TestCheckNoResourceAttr("superset_group.test", "label"),
 					resource.TestCheckNoResourceAttr("superset_group.test", "roles"),
+					resource.TestCheckResourceAttr("superset_group.test", "users.#", "1"),
 					func(*terraform.State) error {
 						fake.mu.Lock()
 						defer fake.mu.Unlock()
@@ -329,6 +331,43 @@ resource "superset_group" "test" {
 						}
 						if roles, _ := fake.group["roles"].([]any); len(roles) != 0 {
 							return errors.New("the roles must be revoked with an empty list")
+						}
+						if users, _ := fake.group["users"].([]any); len(users) != 1 {
+							return errors.New("the members must be kept when the users are unset")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// Members added from the user side show up without a change to apply.
+				PreConfig: func() {
+					fake.mu.Lock()
+					fake.group["users"] = []any{float64(1), float64(2)}
+					fake.mu.Unlock()
+				},
+				Config: providerConfig + `
+resource "superset_group" "test" {
+  name = "finance-team"
+}
+`,
+				PlanOnly: true,
+			},
+			{
+				// An empty set removes every member.
+				Config: providerConfig + `
+resource "superset_group" "test" {
+  name  = "finance-team"
+  users = []
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("superset_group.test", "users.#", "0"),
+					func(*terraform.State) error {
+						fake.mu.Lock()
+						defer fake.mu.Unlock()
+						if users, ok := fake.group["users"].([]any); !ok || len(users) != 0 {
+							return errors.New("the members must be removed with an empty list")
 						}
 						return nil
 					},

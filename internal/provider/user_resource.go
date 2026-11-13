@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -14,7 +15,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"terraform-provider-superset/internal/client"
@@ -47,6 +50,7 @@ type userResourceModel struct {
 	Password    types.String `tfsdk:"password"`
 	Active      types.Bool   `tfsdk:"active"`
 	Roles       types.List   `tfsdk:"roles"`
+	Groups      types.Set    `tfsdk:"groups"`
 	LastUpdated types.String `tfsdk:"last_updated"`
 }
 
@@ -105,6 +109,15 @@ func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 					listplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"groups": schema.SetAttribute{
+				Description: "Identifiers of the groups the user is a member of, on Superset 6, for example from `superset_group`. When unset, the memberships are left as they are, as made by the `users` of the groups; when set, the user is a member of exactly these groups, and `[]` removes it from every group. Manage a membership from one side only, here or in `superset_group`. Null on older versions of Superset, which have no groups and reject the attribute.",
+				ElementType: types.Int64Type,
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"last_updated": schema.StringAttribute{
 				Description: "Timestamp of the last update.",
 				Computed:    true,
@@ -142,6 +155,11 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	groups, diags := configuredGroups(ctx, req.Config, plan.Groups)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	id, err := r.client.CreateUser(
 		plan.Username.ValueString(),
@@ -151,6 +169,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 		plan.Password.ValueString(),
 		plan.Active.ValueBool(),
 		roles,
+		groups,
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -162,6 +181,11 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	plan.ID = types.Int64Value(id)
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC3339))
+	plan.Groups, diags = r.groupsOf(ctx, id)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -222,6 +246,11 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 	state.Roles = rolesList
+	state.Groups, diags = groupsValue(ctx, user.Groups)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Save updated state
 	diags = resp.State.Set(ctx, &state)
@@ -250,6 +279,11 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	groups, diags := configuredGroups(ctx, req.Config, plan.Groups)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	err := r.client.UpdateUser(
 		state.ID.ValueInt64(),
@@ -260,6 +294,7 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		plan.Password.ValueString(), // Can be empty string for no password change
 		plan.Active.ValueBool(),
 		roles,
+		groups,
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to update user", "Error: "+err.Error())
@@ -268,6 +303,11 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	plan.ID = state.ID
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC3339))
+	plan.Groups, diags = r.groupsOf(ctx, state.ID.ValueInt64())
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	resp.State.Set(ctx, &plan)
 	tflog.Debug(ctx, fmt.Sprintf("Updated user: ID=%d, Username=%s", plan.ID.ValueInt64(), plan.Username.ValueString()))
@@ -344,6 +384,40 @@ func (r *userResource) Configure(_ context.Context, req resource.ConfigureReques
 	}
 
 	r.client = client
+}
+
+// configuredGroups returns the groups to send: the planned ones when the configuration sets
+// the attribute, nil otherwise, which leaves the memberships of the user as they are.
+func configuredGroups(ctx context.Context, config tfsdk.Config, planned types.Set) ([]int64, diag.Diagnostics) {
+	var configured types.Set
+	diags := config.GetAttribute(ctx, path.Root("groups"), &configured)
+	if configured.IsNull() || planned.IsUnknown() {
+		return nil, diags
+	}
+	groups := []int64{}
+	diags.Append(planned.ElementsAs(ctx, &groups, false)...)
+	return groups, diags
+}
+
+// groupsOf returns the groups of the user as Superset reports them after a write, which is
+// the configured set or, when the attribute is unset, whatever the groups made of it.
+func (r *userResource) groupsOf(ctx context.Context, id int64) (types.Set, diag.Diagnostics) {
+	user, err := r.client.GetUser(id)
+	if err != nil {
+		var diags diag.Diagnostics
+		diags.AddError("Unable to Read Superset User After Write", fmt.Sprintf("Could not read user ID %d: %s", id, err.Error()))
+		return types.SetNull(types.Int64Type), diags
+	}
+	return groupsValue(ctx, user.Groups)
+}
+
+// groupsValue maps the groups of a user to the state: null when Superset does not return
+// them, which versions before 6 do not.
+func groupsValue(ctx context.Context, groups []int64) (types.Set, diag.Diagnostics) {
+	if groups == nil {
+		return types.SetNull(types.Int64Type), nil
+	}
+	return types.SetValueFrom(ctx, types.Int64Type, groups)
 }
 
 // roleIDsInStateOrder returns the role ids reported by Superset in the order they have in the
