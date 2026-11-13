@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"strconv"
@@ -217,6 +218,11 @@ func (r *rolePermissionsResource) Read(ctx context.Context, req resource.ReadReq
 	}
 
 	roleID, err := r.client.GetRoleIDByName(state.RoleName.ValueString())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "role no longer exists in Superset, removing its permissions from the state", map[string]any{"role_name": state.RoleName.ValueString()})
+		resp.State.RemoveResource(ctx)
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error finding role",

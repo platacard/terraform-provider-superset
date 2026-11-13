@@ -391,7 +391,7 @@ func (c *Client) GetRole(id int64) (*Role, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body) // Read the response body for detailed error logging
-		return nil, responseError("fetch role", resp, body)
+		return nil, objectError("fetch role", resp, body)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -1058,7 +1058,7 @@ func (c *Client) GetUser(id int64) (*User, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, responseError("fetch user", resp, body)
+		return nil, objectError("fetch user", resp, body)
 	}
 
 	body, err := io.ReadAll(resp.Body)

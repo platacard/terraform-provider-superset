@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -188,6 +189,11 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	user, err := r.client.GetUser(state.ID.ValueInt64())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "user no longer exists in Superset, removing it from the state", map[string]any{"id": state.ID.ValueInt64()})
+		resp.State.RemoveResource(ctx)
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading user",

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -124,6 +125,11 @@ func (r *roleResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	role, err := r.client.GetRole(state.ID.ValueInt64())
+	if errors.Is(err, client.ErrNotFound) {
+		tflog.Warn(ctx, "role no longer exists in Superset, removing it from the state", map[string]any{"id": state.ID.ValueInt64()})
+		resp.State.RemoveResource(ctx)
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading role",

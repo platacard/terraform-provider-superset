@@ -60,6 +60,15 @@ func responseError(action string, resp *http.Response, body []byte) error {
 	return errors.New(message)
 }
 
+// objectError describes a failed request for one object. The 404 of an object that does not
+// exist is ErrNotFound; the 404 of an endpoint that does not exist is an error with a hint.
+func objectError(action string, resp *http.Response, body []byte) error {
+	if resp.StatusCode == http.StatusNotFound && !missingEndpoint(resp, body) {
+		return fmt.Errorf("failed to %s: %w", action, ErrNotFound)
+	}
+	return responseError(action, resp, body)
+}
+
 // decodeResponse closes the response body, maps the 404 of a missing object to ErrNotFound,
 // reports any status outside the 2xx range together with the response body, and decodes the
 // body into out when out is not nil. Any 2xx counts as success because the status differs
