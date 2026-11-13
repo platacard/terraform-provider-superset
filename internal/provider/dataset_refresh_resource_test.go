@@ -53,8 +53,8 @@ func TestAccDatasetRefreshResource(t *testing.T) {
 				),
 			},
 			{
-				// A changed trigger replaces the resource, which syncs again: a column dropped
-				// from the dataset in the meantime is detected again.
+				// A changed trigger updates the resource in place, which syncs again: a column
+				// dropped from the dataset in the meantime is detected again.
 				PreConfig: func() {
 					fake.mu.Lock()
 					defer fake.mu.Unlock()
@@ -63,7 +63,7 @@ func TestAccDatasetRefreshResource(t *testing.T) {
 				Config: datasetRefreshConfig("2"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("superset_dataset_refresh.test", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("superset_dataset_refresh.test", plancheck.ResourceActionUpdate),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/jarcoal/httpmock"
 )
@@ -414,8 +415,14 @@ resource "superset_database_permissions_sync" "test" {
 				),
 			},
 			{
+				// A changed trigger updates the resource in place and syncs again.
 				Config: config("2"),
-				Check:  count(2),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("superset_database_permissions_sync.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: count(2),
 			},
 			{
 				// A connection that was recreated is synced again.
