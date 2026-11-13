@@ -154,7 +154,7 @@ func TestDeleteOfAMissingObjectSucceeds(t *testing.T) {
 		return httpmock.NewJsonResponse(http.StatusNotFound, map[string]string{"message": "Not found"})
 	})
 
-	ctx := context.Background()
+	ctx := t.Context()
 	server := providerserver.NewProtocol6(New("test")())()
 	schemas, err := server.GetProviderSchema(ctx, &tfprotov6.GetProviderSchemaRequest{})
 	if err != nil {
@@ -177,7 +177,10 @@ func TestDeleteOfAMissingObjectSucceeds(t *testing.T) {
 
 	for name, s := range schemas.ResourceSchemas {
 		t.Run(name, func(t *testing.T) {
-			objectType := s.ValueType().(tftypes.Object)
+			objectType, ok := s.ValueType().(tftypes.Object)
+			if !ok {
+				t.Fatalf("the schema type is %T, want an object", s.ValueType())
+			}
 			values := map[string]tftypes.Value{}
 			for attr, typ := range objectType.AttributeTypes {
 				values[attr] = tftypes.NewValue(typ, nil)
