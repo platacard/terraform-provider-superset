@@ -40,6 +40,8 @@ type SQLResult struct {
 	RawRows json.RawMessage
 	// Limited reports that the rows were cut by the limit of the query.
 	Limited bool
+	// QueryID is the id of the run in the query history of SQL Lab.
+	QueryID int64
 }
 
 type sqlLabPayload struct {
@@ -91,6 +93,7 @@ func (c *Client) ExecuteSQL(query SQLQuery) (*SQLResult, error) {
 
 	var result struct {
 		Status  string          `json:"status"`
+		QueryID int64           `json:"query_id"`
 		Columns []SQLColumn     `json:"columns"`
 		Data    json.RawMessage `json:"data"`
 		Query   struct {
@@ -118,6 +121,7 @@ func (c *Client) ExecuteSQL(query SQLQuery) (*SQLResult, error) {
 		Rows:    rows,
 		RawRows: result.Data,
 		Limited: result.Query.LimitingFactor != "" && result.Query.LimitingFactor != "NOT_LIMITED",
+		QueryID: result.QueryID,
 	}, nil
 }
 
