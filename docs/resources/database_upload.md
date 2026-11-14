@@ -80,7 +80,7 @@ resource "superset_database_upload" "currencies" {
 - `index_label` (String) Name of the index column when it is written.
 - `null_values` (List of String) Values to read as null, in addition to the defaults of pandas.
 - `rows_to_read` (Number) Number of rows to read; all of them when unset.
-- `schema` (String) Schema of the table. When unset, the default schema of the connection is used and the existence of the table is not checked.
+- `schema` (String) Schema of the table. When unset, the default schema of the connection is used and only the existence of the connection is checked, not the table.
 - `sheet_name` (String) Sheet of an Excel file to read. Defaults to the first one.
 - `skip_blank_lines` (Boolean) Whether blank lines are skipped instead of read as rows of nulls.
 - `skip_initial_space` (Boolean) Whether spaces after the delimiter are skipped.

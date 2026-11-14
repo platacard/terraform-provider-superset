@@ -107,7 +107,7 @@ func (r *databaseUploadResource) Schema(_ context.Context, _ resource.SchemaRequ
 				PlanModifiers: replaceString,
 			},
 			"schema": schema.StringAttribute{
-				Description:   "Schema of the table. When unset, the default schema of the connection is used and the existence of the table is not checked.",
+				Description:   "Schema of the table. When unset, the default schema of the connection is used and only the existence of the connection is checked, not the table.",
 				Optional:      true,
 				PlanModifiers: replaceString,
 			},
@@ -243,11 +243,23 @@ func (r *databaseUploadResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	if schema := state.Schema.ValueString(); schema != "" {
-		tables, err := r.client.DatabaseTables(state.DatabaseID.ValueInt64(), schema, "")
+	databaseID := state.DatabaseID.ValueInt64()
+	if schema := state.Schema.ValueString(); schema == "" {
+		// Without a schema the table cannot be listed; the connection at least must exist.
+		if _, err := r.client.GetDatabaseConnection(databaseID); err != nil {
+			if errors.Is(err, client.ErrNotFound) {
+				tflog.Warn(ctx, "The database connection no longer exists; the upload is planned again", map[string]any{"database_id": databaseID})
+				resp.State.RemoveResource(ctx)
+				return
+			}
+			resp.Diagnostics.AddError("Unable to Read the Superset Database", err.Error())
+			return
+		}
+	} else {
+		tables, err := r.client.DatabaseTables(databaseID, schema, "")
 		if err != nil {
 			if errors.Is(err, client.ErrNotFound) {
-				tflog.Warn(ctx, "The database connection no longer exists; the upload is planned again", map[string]any{"database_id": state.DatabaseID.ValueInt64()})
+				tflog.Warn(ctx, "The database connection no longer exists; the upload is planned again", map[string]any{"database_id": databaseID})
 				resp.State.RemoveResource(ctx)
 				return
 			}
