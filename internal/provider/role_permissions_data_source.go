@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"terraform-provider-superset/internal/client"
+	"github.com/platacard/terraform-provider-superset/internal/client"
 )
 
 // Ensure the implementation satisfies the expected interfaces.

@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"terraform-provider-superset/internal/bundle"
-	"terraform-provider-superset/internal/client"
+	"github.com/platacard/terraform-provider-superset/internal/bundle"
+	"github.com/platacard/terraform-provider-superset/internal/client"
 )
 
 // attributeGetter reads one attribute of a configuration, a plan or a state.

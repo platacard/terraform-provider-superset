@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"terraform-provider-superset/internal/bundle"
+	"github.com/platacard/terraform-provider-superset/internal/bundle"
 )
 
 // ImportKind names the import endpoint of a kind of object and how its objects are looked up.
