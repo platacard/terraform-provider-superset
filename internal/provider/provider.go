@@ -324,6 +324,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewDashboardResource,               // Dashboard
 		NewDashboardEmbeddingResource,      // Dashboard embedding
 		NewDashboardCopyResource,           // Dashboard copied from another one
+		NewRoleMembersResource,             // Users and groups of a role (Superset 6)
 		NewDashboardImportResource,         // Dashboard import
 		NewChartImportResource,             // Chart import
 		NewDatasetImportResource,           // Dataset import
