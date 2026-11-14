@@ -9,6 +9,8 @@ FEATURES:
 * **New Data Source**: `superset_tag` - A tag looked up by its name.
 * **New Data Source**: `superset_report` - A report or alert looked up by its name, narrowed down by `type` when an alert and a report share it, with its schedule and last state.
 * **New Data Source**: `superset_theme` - A theme looked up by its name, on Superset 6, for example the built-in `THEME_DARK` to apply to a dashboard.
+* **New Data Source**: `superset_charts` - The charts that match a few filters (owner, tag, visualization type, dataset, dashboard), with their ids and names, for example every chart of a dashboard.
+* **New Data Source**: `superset_dashboards` - The dashboards that match a few filters (owner, tag, published), with their ids, titles and slugs, for example every published dashboard.
 
 ## 1.1.0 (2026-11-14)
 

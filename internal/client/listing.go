@@ -300,3 +300,50 @@ func (c *Client) ResolvePermissionIDs(refs []PermissionRef) (map[PermissionRef]i
 	}
 	return ids, nil
 }
+
+// relatedToMany matches rows whose many-to-many relation column contains the row with the
+// given id. A value that matches no row is ignored by Flask-AppBuilder, which then returns
+// every row, so callers compare the relation again.
+func relatedToMany(column string, id int64) listFilter {
+	return listFilter{column: column, operator: "rel_m_m", value: strconv.FormatInt(id, 10)}
+}
+
+// equalsBool matches rows whose boolean column equals value.
+func equalsBool(column string, value bool) listFilter {
+	if value {
+		return listFilter{column: column, operator: "eq", value: "!t"}
+	}
+	return listFilter{column: column, operator: "eq", value: "!f"}
+}
+
+// taggedWith matches rows that carry a tag whose name contains the given text, through the
+// tag filter of the endpoint (chart_tags or dashboard_tags). The match is a case-insensitive
+// substring match on the server, so callers compare the tag names again.
+func taggedWith(operator, name string) listFilter {
+	return listFilter{column: "tags", operator: operator, value: risonString(name)}
+}
+
+// idItem is a related row of which only the id matters.
+type idItem struct {
+	ID int64 `json:"id"`
+}
+
+// containsID reports whether one of the items has the given id.
+func containsID(items []idItem, id int64) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTag reports whether one of the tags has exactly the given name.
+func hasTag(tags []namedItem, name string) bool {
+	for _, tag := range tags {
+		if tag.Name == name {
+			return true
+		}
+	}
+	return false
+}
