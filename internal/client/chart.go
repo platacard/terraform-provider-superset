@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -266,4 +267,62 @@ func (c *Client) FindCharts(name string, datasourceID *int64) ([]ChartSummary, e
 		}
 	}
 	return matches, nil
+}
+
+// ChartFilters narrows the charts a listing returns. Every filter that is set must match;
+// unset filters (nil pointers and empty strings) are not sent.
+type ChartFilters struct {
+	OwnerID      *int64
+	Tag          string
+	VizType      string
+	DatasourceID *int64
+	DashboardID  *int64
+}
+
+// ListCharts returns every chart that matches the filters, in the order of their ids. The
+// server narrows the list; the owner, the tag and the dashboard are compared again because
+// the server ignores an unknown owner or dashboard and matches tag names loosely.
+func (c *Client) ListCharts(filters ChartFilters) ([]ChartSummary, error) {
+	var query []listFilter
+	if filters.OwnerID != nil {
+		query = append(query, relatedToMany("owners", *filters.OwnerID))
+	}
+	if filters.Tag != "" {
+		query = append(query, taggedWith("chart_tags", filters.Tag))
+	}
+	if filters.VizType != "" {
+		query = append(query, equals("viz_type", filters.VizType))
+	}
+	if filters.DatasourceID != nil {
+		query = append(query, equalsInt("datasource_id", *filters.DatasourceID))
+	}
+	if filters.DashboardID != nil {
+		query = append(query, relatedToMany("dashboards", *filters.DashboardID))
+	}
+
+	type row struct {
+		ChartSummary
+		Owners     []idItem    `json:"owners"`
+		Tags       []namedItem `json:"tags"`
+		Dashboards []idItem    `json:"dashboards"`
+	}
+	rows, err := listInto[row](c, chartsPath, query...)
+	if err != nil {
+		return nil, fmt.Errorf("charts: %w", err)
+	}
+
+	charts := make([]ChartSummary, 0, len(rows))
+	for _, r := range rows {
+		switch {
+		case filters.OwnerID != nil && !containsID(r.Owners, *filters.OwnerID):
+		case filters.Tag != "" && !hasTag(r.Tags, filters.Tag):
+		case filters.VizType != "" && r.VizType != filters.VizType:
+		case filters.DatasourceID != nil && r.DatasourceID != *filters.DatasourceID:
+		case filters.DashboardID != nil && !containsID(r.Dashboards, *filters.DashboardID):
+		default:
+			charts = append(charts, r.ChartSummary)
+		}
+	}
+	sort.Slice(charts, func(i, j int) bool { return charts[i].ID < charts[j].ID })
+	return charts, nil
 }

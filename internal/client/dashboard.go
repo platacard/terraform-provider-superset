@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"sort"
 )
 
 const dashboardsPath = "/api/v1/dashboard/"
@@ -284,4 +285,51 @@ func (c *Client) FindDashboards(slug, title string) ([]DashboardSummary, error) 
 		}
 	}
 	return matches, nil
+}
+
+// DashboardFilters narrows the dashboards a listing returns. Every filter that is set must
+// match; unset filters (nil pointers and empty strings) are not sent.
+type DashboardFilters struct {
+	OwnerID   *int64
+	Tag       string
+	Published *bool
+}
+
+// ListDashboards returns every dashboard that matches the filters, in the order of their
+// ids. The server narrows the list; the owner and the tag are compared again because the
+// server ignores an unknown owner and matches tag names loosely.
+func (c *Client) ListDashboards(filters DashboardFilters) ([]DashboardSummary, error) {
+	var query []listFilter
+	if filters.OwnerID != nil {
+		query = append(query, relatedToMany("owners", *filters.OwnerID))
+	}
+	if filters.Tag != "" {
+		query = append(query, taggedWith("dashboard_tags", filters.Tag))
+	}
+	if filters.Published != nil {
+		query = append(query, equalsBool("published", *filters.Published))
+	}
+
+	type row struct {
+		DashboardSummary
+		Owners []idItem    `json:"owners"`
+		Tags   []namedItem `json:"tags"`
+	}
+	rows, err := listInto[row](c, dashboardsPath, query...)
+	if err != nil {
+		return nil, fmt.Errorf("dashboards: %w", err)
+	}
+
+	dashboards := make([]DashboardSummary, 0, len(rows))
+	for _, r := range rows {
+		switch {
+		case filters.OwnerID != nil && !containsID(r.Owners, *filters.OwnerID):
+		case filters.Tag != "" && !hasTag(r.Tags, filters.Tag):
+		case filters.Published != nil && r.Published != *filters.Published:
+		default:
+			dashboards = append(dashboards, r.DashboardSummary)
+		}
+	}
+	sort.Slice(dashboards, func(i, j int) bool { return dashboards[i].ID < dashboards[j].ID })
+	return dashboards, nil
 }

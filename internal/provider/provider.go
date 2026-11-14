@@ -294,6 +294,8 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewTagDataSource,              // Tag looked up by name
 		NewReportDataSource,           // Report or alert looked up by name
 		NewThemeDataSource,            // Theme looked up by name (Superset 6)
+		NewChartsDataSource,           // Charts matching filters
+		NewDashboardsDataSource,       // Dashboards matching filters
 	}
 }
 
