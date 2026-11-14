@@ -15,8 +15,8 @@ const securityAPIHint = "Superset does not expose this endpoint: the users, role
 	"Flask-AppBuilder security API, which Superset only enables with FAB_ADD_SECURITY_API = True in superset_config.py."
 
 // supersetSixHint explains the 404 of the endpoints that only recent versions of Superset have.
-const supersetSixHint = "This endpoint does not exist on this version of Superset: themes, groups and the permission sync " +
-	"of a database need Superset 6."
+const supersetSixHint = "This endpoint does not exist on this version of Superset: themes, groups, the members of a role " +
+	"and the permission sync of a database need Superset 6."
 
 // supersetSixEndpoint reports whether the request went to an endpoint of Superset 6.
 func supersetSixEndpoint(resp *http.Response) bool {
@@ -24,7 +24,8 @@ func supersetSixEndpoint(resp *http.Response) bool {
 		return false
 	}
 	path := resp.Request.URL.Path
-	return strings.HasPrefix(path, "/api/v1/theme/") || strings.HasPrefix(path, "/api/v1/security/groups/") || strings.HasSuffix(path, "/sync_permissions/")
+	roleMembers := strings.HasPrefix(path, "/api/v1/security/roles/") && (strings.HasSuffix(path, "/users") || strings.HasSuffix(path, "/groups"))
+	return strings.HasPrefix(path, "/api/v1/theme/") || strings.HasPrefix(path, "/api/v1/security/groups/") || strings.HasSuffix(path, "/sync_permissions/") || roleMembers
 }
 
 // missingEndpoint reports whether the response is the 404 of a route that does not exist, as
