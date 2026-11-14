@@ -300,6 +300,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatabaseRelatedObjectsDataSource, // Charts and dashboards that depend on a connection
 		NewDatabaseEnginesDataSource,        // Engines the instance can connect to
 		NewDatabaseCatalogsDataSource,       // Catalogs of a database connection (Superset 6)
+		NewSlackChannelsDataSource,          // Slack channels reports can be sent to
 	}
 }
 

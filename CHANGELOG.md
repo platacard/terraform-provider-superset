@@ -20,6 +20,7 @@ FEATURES:
 * **New Data Source**: `superset_database_related_objects` - The charts and dashboards that depend on a database connection, looked up by its name or its id.
 * **New Data Source**: `superset_database_engines` - The database engines the instance can connect to, with their drivers and the shape of their connection URI, for example to check that a driver is installed.
 * **New Data Source**: `superset_database_catalogs` - The catalogs of a database connection, on Superset 6, for engines with several catalogs.
+* **New Data Source**: `superset_slack_channels` - The channels of the Slack workspace Superset is connected to, with the ids the `SlackV2` recipients of a report take.
 
 IMPROVEMENTS:
 * data-source/superset_database_schemas, data-source/superset_database_tables: New `catalog` attribute to list the schemas or the tables of one catalog of the connection, on Superset 6; older versions ignore it.
