@@ -1,4 +1,4 @@
-## 1.1.0 (2026-11-13)
+## 1.1.0 (2026-11-14)
 
 FEATURES:
 * **New Resource**: `superset_sql_execution` - Run a SQL statement through SQL Lab on a database connection when the resource is created and whenever its triggers change, with an optional statement for its destruction, for example to create a view and drop it again.
@@ -18,6 +18,7 @@ IMPROVEMENTS:
 * resource/superset_dataset_refresh, resource/superset_database_permissions_sync: A change of `triggers` now runs the sync again in place instead of replacing the resource. (#95, hayone1)
 * provider: Every request now has a timeout of five minutes, so a Superset that accepts a connection and never answers no longer blocks an apply forever, and the client no longer prints debug lines to stdout. (#91, hayone1)
 * provider: Requests and logins that Superset rate-limits with `429 Too Many Requests` are sent again after a pause, following `Retry-After` or an exponential backoff, up to four times. (#97, hayone1)
+* provider: The Go module is now `github.com/platacard/terraform-provider-superset` and a public `provider` package exposes `New` and `Address` for Go programs that serve the provider in-process or drive it through the plugin protocol; `-debug` announces the provider as `registry.terraform.io/platacard/superset` instead of `hashicorp/platacard/superset`. (#90, hayone1)
 
 BUG FIXES:
 * resource/superset_dataset: `cache_timeout` stays null when it is not configured and Superset reports 0, which failed the apply with "Provider produced inconsistent result" on Superset 6.1 and planned an update on every run for an imported dataset. (#94, hayone1)
