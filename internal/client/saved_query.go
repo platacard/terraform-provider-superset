@@ -151,3 +151,38 @@ func (c *Client) DeleteSavedQuery(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete saved query")
 }
+
+// SavedQuerySummary is a saved query as the list endpoint describes it.
+type SavedQuerySummary struct {
+	ID          int64  `json:"id"`
+	Label       string `json:"label"`
+	Schema      string `json:"schema"`
+	Catalog     string `json:"catalog"`
+	SQL         string `json:"sql"`
+	Description string `json:"description"`
+	Database    struct {
+		ID   int64  `json:"id"`
+		Name string `json:"database_name"`
+	} `json:"database"`
+}
+
+// FindSavedQueries returns the saved queries with exactly the given label, on the given
+// database connection when one is set. The label is compared again because the server
+// comparison can be case-insensitive.
+func (c *Client) FindSavedQueries(label string, databaseID *int64) ([]SavedQuerySummary, error) {
+	filters := []listFilter{equals("label", label)}
+	if databaseID != nil {
+		filters = append(filters, relatedTo("database", *databaseID))
+	}
+	rows, err := listInto[SavedQuerySummary](c, savedQueriesPath, filters...)
+	if err != nil {
+		return nil, fmt.Errorf("saved queries labelled %q: %w", label, err)
+	}
+	matches := make([]SavedQuerySummary, 0, len(rows))
+	for _, row := range rows {
+		if row.Label == label {
+			matches = append(matches, row)
+		}
+	}
+	return matches, nil
+}

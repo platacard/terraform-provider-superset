@@ -97,3 +97,23 @@ func (c *Client) DeleteAnnotationLayer(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete annotation layer")
 }
+
+// FindAnnotationLayers returns the layers with exactly the given name. The name is compared
+// again because the server comparison can be case-insensitive.
+func (c *Client) FindAnnotationLayers(name string) ([]AnnotationLayer, error) {
+	type row struct {
+		ID int64 `json:"id"`
+		annotationLayerResult
+	}
+	rows, err := listInto[row](c, annotationLayersPath, equals("name", name))
+	if err != nil {
+		return nil, fmt.Errorf("annotation layers named %q: %w", name, err)
+	}
+	matches := make([]AnnotationLayer, 0, len(rows))
+	for _, r := range rows {
+		if r.Name == name {
+			matches = append(matches, AnnotationLayer{ID: r.ID, Name: r.Name, Description: r.Description})
+		}
+	}
+	return matches, nil
+}

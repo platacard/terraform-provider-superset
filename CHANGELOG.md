@@ -1,3 +1,15 @@
+## Unreleased
+
+FEATURES:
+* **New Data Source**: `superset_user` - A user looked up by its username, with its roles and, on Superset 6, its groups.
+* **New Data Source**: `superset_group` - A group looked up by its name, on Superset 6, with its roles and members.
+* **New Data Source**: `superset_row_level_security` - A row level security rule looked up by its name, with its clause, datasets and roles.
+* **New Data Source**: `superset_saved_query` - A saved query of SQL Lab looked up by its label, narrowed down by `database_id` when several share it.
+* **New Data Source**: `superset_annotation_layer` - An annotation layer looked up by its name.
+* **New Data Source**: `superset_tag` - A tag looked up by its name.
+* **New Data Source**: `superset_report` - A report or alert looked up by its name, narrowed down by `type` when an alert and a report share it, with its schedule and last state.
+* **New Data Source**: `superset_theme` - A theme looked up by its name, on Superset 6, for example the built-in `THEME_DARK` to apply to a dashboard.
+
 ## 1.1.0 (2026-11-14)
 
 FEATURES:

@@ -59,10 +59,14 @@ func tagPath(id int64) string {
 
 // FindTagByName returns the tag with exactly the given name, or ErrNotFound. The server
 // filters on equality; the name is compared again because the comparison can be
-// case-insensitive depending on the metadata database.
+// case-insensitive depending on the metadata database. The 404 of the tag API when the
+// tagging system is off gets its hint.
 func (c *Client) FindTagByName(name string) (*Tag, error) {
 	rows, err := listInto[tagSummary](c, tagsPath, equals("name", name))
 	if err != nil {
+		if missingTaggingSystem(err) {
+			return nil, fmt.Errorf("tag %q: %w\n%s", name, err, taggingSystemHint)
+		}
 		return nil, fmt.Errorf("tag %q: %w", name, err)
 	}
 	for _, row := range rows {

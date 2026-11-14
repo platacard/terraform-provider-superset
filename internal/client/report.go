@@ -359,3 +359,41 @@ func (c *Client) DeleteReport(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete report")
 }
+
+// ReportSummary is a report or an alert as the list endpoint describes it.
+type ReportSummary struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Crontab     string `json:"crontab"`
+	Timezone    string `json:"timezone"`
+	Active      bool   `json:"active"`
+	ChartID     *int64 `json:"chart_id"`
+	DashboardID *int64 `json:"dashboard_id"`
+	LastState   string `json:"last_state"`
+}
+
+// FindReports returns the reports and alerts with exactly the given name, of the given type
+// (Alert or Report) when one is set. The name is compared again because the server comparison
+// can be case-insensitive. The 404 of the report API when the feature is off gets its hint.
+func (c *Client) FindReports(name, reportType string) ([]ReportSummary, error) {
+	filters := []listFilter{equals("name", name)}
+	if reportType != "" {
+		filters = append(filters, equals("type", reportType))
+	}
+	rows, err := listInto[ReportSummary](c, reportsPath, filters...)
+	if err != nil {
+		if strings.Contains(err.Error(), "status code: 404") {
+			return nil, fmt.Errorf("reports named %q: %w\n%s", name, err, alertReportsHint)
+		}
+		return nil, fmt.Errorf("reports named %q: %w", name, err)
+	}
+	matches := make([]ReportSummary, 0, len(rows))
+	for _, row := range rows {
+		if row.Name == name {
+			matches = append(matches, row)
+		}
+	}
+	return matches, nil
+}

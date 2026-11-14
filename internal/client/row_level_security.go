@@ -157,3 +157,32 @@ func ids(items []namedItem) []int64 {
 	}
 	return result
 }
+
+// FindRowLevelSecurityByName returns the rule with exactly the given name, or ErrNotFound.
+// Rule names are unique in Superset; the name is compared again because the server
+// comparison can be case-insensitive.
+func (c *Client) FindRowLevelSecurityByName(name string) (*RowLevelSecurity, error) {
+	type row struct {
+		ID int64 `json:"id"`
+		rowLevelSecurityResult
+	}
+	rows, err := listInto[row](c, rowLevelSecurityPath, equals("name", name))
+	if err != nil {
+		return nil, fmt.Errorf("row level security rules named %q: %w", name, err)
+	}
+	for _, r := range rows {
+		if r.Name == name {
+			return &RowLevelSecurity{
+				ID:          r.ID,
+				Name:        r.Name,
+				Description: r.Description,
+				FilterType:  r.FilterType,
+				GroupKey:    r.GroupKey,
+				Clause:      r.Clause,
+				TableIDs:    ids(r.Tables),
+				RoleIDs:     ids(r.Roles),
+			}, nil
+		}
+	}
+	return nil, ErrNotFound
+}
