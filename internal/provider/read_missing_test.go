@@ -192,7 +192,7 @@ func TestDeleteOfAMissingObjectSucceeds(t *testing.T) {
 			}
 			// The import resources delete the objects of their last import.
 			for _, ids := range []string{"dashboard_ids", "chart_ids", "dataset_ids"} {
-				if typ, ok := objectType.AttributeTypes[ids]; ok {
+				if typ, ok := objectType.AttributeTypes[ids]; ok && typ.Is(tftypes.Map{}) {
 					values[ids] = tftypes.NewValue(typ, map[string]tftypes.Value{"11111111-1111-1111-1111-111111111111": tftypes.NewValue(tftypes.Number, big.NewFloat(7))})
 				}
 			}

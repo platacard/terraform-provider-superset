@@ -1,6 +1,7 @@
 ## Unreleased
 
 FEATURES:
+* **New Resource**: `superset_dashboard_copy` - A dashboard copied from another one through the copy endpoint, with its own title, CSS and settings, showing the same charts as the source or duplicates of them; afterwards managed as a dashboard of its own.
 * **New Data Source**: `superset_user` - A user looked up by its username, with its roles and, on Superset 6, its groups.
 * **New Data Source**: `superset_group` - A group looked up by its name, on Superset 6, with its roles and members.
 * **New Data Source**: `superset_row_level_security` - A row level security rule looked up by its name, with its clause, datasets and roles.
