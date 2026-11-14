@@ -1,4 +1,4 @@
-## Unreleased
+## 1.1.0 (2026-11-14)
 
 FEATURES:
 * **New Resource**: `superset_sql_execution` - Run a SQL statement through SQL Lab on a database connection when the resource is created and whenever its triggers change, with an optional statement for its destruction, for example to create a view and drop it again.
@@ -14,6 +14,18 @@ IMPROVEMENTS:
 * resource/superset_chart: New `dashboards` attribute with the identifiers of the dashboards the chart is linked to; when unset, the links made by the layouts of the dashboards are left as they are.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New `is_managed_externally` and `external_url` attributes. A managed object gets a banner in Superset and cannot be edited in the UI, which protects what Terraform manages; the url is the link of that banner.
 * resource/superset_chart, resource/superset_dashboard, resource/superset_dataset, resource/superset_database: New computed `uuid` attribute, the identifier of the object in export files (null for charts, dashboards and datasets on Superset 3.1, which does not return it).
+* resource/superset_dashboard_import, resource/superset_chart_import, resource/superset_dataset_import, resource/superset_assets_import: New `files` attribute with the content of the files of the bundle given inline, for machines that have no copy of the export; exactly one of `source` and `files` must be set. The keys of `database_passwords` and of the SSH tunnel maps may now be the file name alone, such as `warehouse.yaml`. (#92, hayone1)
+* resource/superset_dataset_refresh, resource/superset_database_permissions_sync: A change of `triggers` now runs the sync again in place instead of replacing the resource. (#95, hayone1)
+* provider: Every request now has a timeout of five minutes, so a Superset that accepts a connection and never answers no longer blocks an apply forever, and the client no longer prints debug lines to stdout. (#91, hayone1)
+* provider: Requests and logins that Superset rate-limits with `429 Too Many Requests` are sent again after a pause, following `Retry-After` or an exponential backoff, up to four times. (#97, hayone1)
+* provider: The Go module is now `github.com/platacard/terraform-provider-superset` and a public `provider` package exposes `New` and `Address` for Go programs that serve the provider in-process or drive it through the plugin protocol; `-debug` announces the provider as `registry.terraform.io/platacard/superset` instead of `hashicorp/platacard/superset`. (#90, hayone1)
+
+BUG FIXES:
+* resource/superset_dataset: `cache_timeout` stays null when it is not configured and Superset reports 0, which failed the apply with "Provider produced inconsistent result" on Superset 6.1 and planned an update on every run for an imported dataset. (#94, hayone1)
+* resource/superset_role, resource/superset_user, resource/superset_role_permissions: A role or a user deleted outside Terraform is now planned again instead of failing the plan with a 404. (#93, hayone1)
+* resource/superset_role, resource/superset_user, resource/superset_meta_database, resource/superset_role_permissions: Destroying an object that is already gone now succeeds instead of failing with a 404. (#96, hayone1)
+* provider: The list of database connections is cached per provider configuration and dropped after every change of a connection, which fixes `database with ID n not found` right after a connection is created and the mix-up of two Superset instances configured in one process. (#91, hayone1)
+* resource/superset_dashboard_import, resource/superset_chart_import, resource/superset_dataset_import, resource/superset_assets_import: When an imported object is deleted in Superset, `content_hash` becomes `outdated` instead of being cleared and the identifiers of the imported objects stay; the next plan imports the bundle again as before. (#98, hayone1)
 
 ## 1.0.0 (2026-11-08)
 
