@@ -38,6 +38,34 @@ func serveLookups() {
 			"(col:slug,opr:eq,value:'sales')":            `{"id": 30, "dashboard_title": "Sales", "slug": "sales", "published": true, "status": "published", "url": "/superset/dashboard/sales/"}`,
 			"(col:dashboard_title,opr:eq,value:'Sales')": `{"id": 30, "dashboard_title": "Sales", "slug": "sales", "published": true, "status": "published", "url": "/superset/dashboard/sales/"}, {"id": 31, "dashboard_title": "Sales", "slug": null, "published": false, "status": "draft", "url": "/superset/dashboard/31/"}`,
 		}},
+		{path: "/api/v1/security/users/", rows: map[string]string{
+			"(col:username,opr:eq,value:'analyst')": `{"id": 7, "username": "analyst", "first_name": "Ana", "last_name": "Lyst", "email": "analyst@example.com", "active": true, "roles": [{"id": 4, "name": "Gamma"}, {"id": 5, "name": "sql_lab"}], "groups": [{"id": 2, "name": "analysts"}]}`,
+			"(col:username,opr:eq,value:'legacy')":  `{"id": 8, "username": "legacy", "first_name": "Old", "last_name": "User", "email": "legacy@example.com", "active": false, "roles": []}`,
+		}},
+		{path: "/api/v1/security/groups/", rows: map[string]string{
+			"(col:name,opr:eq,value:'analysts')": `{"id": 2, "name": "analysts", "label": "Analysts", "description": null, "roles": [{"id": 4, "name": "Gamma"}], "users": [{"id": 7, "name": "analyst"}]}`,
+		}},
+		{path: "/api/v1/rowlevelsecurity/", rows: map[string]string{
+			"(col:name,opr:eq,value:'Region')": `{"id": 5, "name": "Region", "description": "Rows of the region of the user", "filter_type": "Regular", "group_key": "region", "clause": "region = '{{ current_username() }}'", "tables": [{"id": 10, "schema": "public", "table_name": "sales"}], "roles": [{"id": 4, "name": "Gamma"}]}`,
+		}},
+		{path: "/api/v1/saved_query/", rows: map[string]string{
+			"(col:label,opr:eq,value:'Top customers')":                                    `{"id": 40, "label": "Top customers", "schema": "public", "catalog": null, "sql": "SELECT * FROM customers LIMIT 10", "description": "Ten best", "database": {"id": 3, "database_name": "Warehouse"}}, {"id": 41, "label": "Top customers", "schema": null, "catalog": "pgdb", "sql": "SELECT 1", "description": null, "database": {"id": 4, "database_name": "Staging"}}`,
+			"(col:label,opr:eq,value:'Top customers'),(col:database,opr:rel_o_m,value:4)": `{"id": 41, "label": "Top customers", "schema": null, "catalog": "pgdb", "sql": "SELECT 1", "description": null, "database": {"id": 4, "database_name": "Staging"}}`,
+		}},
+		{path: "/api/v1/annotation_layer/", rows: map[string]string{
+			"(col:name,opr:eq,value:'Releases')": `{"id": 50, "name": "Releases", "descr": "Production releases"}`,
+			"(col:name,opr:eq,value:'Twice')":    `{"id": 51, "name": "Twice", "descr": ""}, {"id": 52, "name": "Twice", "descr": ""}`,
+		}},
+		{path: "/api/v1/tag/", rows: map[string]string{
+			"(col:name,opr:eq,value:'finance')": `{"id": 60, "name": "finance", "description": "Finance team", "type": 1}`,
+		}},
+		{path: "/api/v1/report/", rows: map[string]string{
+			"(col:name,opr:eq,value:'Weekly sales')":                                 `{"id": 70, "name": "Weekly sales", "type": "Report", "description": "Every Monday", "crontab": "0 9 * * 1", "timezone": "UTC", "active": true, "chart_id": null, "dashboard_id": 30, "last_state": "Success"}, {"id": 71, "name": "Weekly sales", "type": "Alert", "description": null, "crontab": "0 * * * *", "timezone": "Europe/Berlin", "active": false, "chart_id": 20, "dashboard_id": null, "last_state": "Not triggered"}`,
+			"(col:name,opr:eq,value:'Weekly sales'),(col:type,opr:eq,value:'Alert')": `{"id": 71, "name": "Weekly sales", "type": "Alert", "description": null, "crontab": "0 * * * *", "timezone": "Europe/Berlin", "active": false, "chart_id": 20, "dashboard_id": null, "last_state": "Not triggered"}`,
+		}},
+		{path: "/api/v1/theme/", rows: map[string]string{
+			"(col:theme_name,opr:eq,value:'Corporate')": `{"id": 80, "theme_name": "Corporate", "json_data": "{\"token\": {\"colorPrimary\": \"#1f77b4\"}}", "uuid": "ad3b15d6-d271-410b-8781-c8e76073b594", "is_system": false, "is_system_default": true, "is_system_dark": false}`,
+		}},
 	}
 	for _, l := range listings {
 		rows := l.rows

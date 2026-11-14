@@ -270,22 +270,30 @@ func (p *supersetProvider) Configure(ctx context.Context, req provider.Configure
 // DataSources defines the data sources implemented in the provider.
 func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewRoleDataSource,            // Single role looked up by name
-		NewRolesDataSource,           // Existing data source
-		NewRolePermissionsDataSource, // New data source
-		NewDatabasesDataSource,       // New databases data source
-		NewDatasetsDataSource,        // New datasets data source
-		NewUsersDataSource,           // New users data source
-		NewCSSTemplateDataSource,     // CSS template looked up by name
-		NewDatabaseDataSource,        // Database connection looked up by name
-		NewDatasetDataSource,         // Dataset looked up by table name
-		NewChartDataSource,           // Chart looked up by name
-		NewDashboardDataSource,       // Dashboard looked up by slug or title
-		NewDatabaseSchemasDataSource, // Schemas of a database connection
-		NewDatabaseTablesDataSource,  // Tables of a schema
-		NewDatabaseTableDataSource,   // Columns of a table
-		NewSQLQueryDataSource,        // Rows of a SQL query run through SQL Lab
-		NewCurrentUserDataSource,     // The user the provider is authenticated as (Superset 6)
+		NewRoleDataSource,             // Single role looked up by name
+		NewRolesDataSource,            // Existing data source
+		NewRolePermissionsDataSource,  // New data source
+		NewDatabasesDataSource,        // New databases data source
+		NewDatasetsDataSource,         // New datasets data source
+		NewUsersDataSource,            // New users data source
+		NewCSSTemplateDataSource,      // CSS template looked up by name
+		NewDatabaseDataSource,         // Database connection looked up by name
+		NewDatasetDataSource,          // Dataset looked up by table name
+		NewChartDataSource,            // Chart looked up by name
+		NewDashboardDataSource,        // Dashboard looked up by slug or title
+		NewDatabaseSchemasDataSource,  // Schemas of a database connection
+		NewDatabaseTablesDataSource,   // Tables of a schema
+		NewDatabaseTableDataSource,    // Columns of a table
+		NewSQLQueryDataSource,         // Rows of a SQL query run through SQL Lab
+		NewCurrentUserDataSource,      // The user the provider is authenticated as (Superset 6)
+		NewUserDataSource,             // User looked up by username
+		NewGroupDataSource,            // Group looked up by name (Superset 6)
+		NewRowLevelSecurityDataSource, // Row level security rule looked up by name
+		NewSavedQueryDataSource,       // Saved query looked up by label
+		NewAnnotationLayerDataSource,  // Annotation layer looked up by name
+		NewTagDataSource,              // Tag looked up by name
+		NewReportDataSource,           // Report or alert looked up by name
+		NewThemeDataSource,            // Theme looked up by name (Superset 6)
 	}
 }
 

@@ -1272,3 +1272,35 @@ func (c *Client) DeleteUser(id int64) error {
 
 	return nil
 }
+
+// FindUserByUsername returns the user with exactly the given username, or ErrNotFound. The
+// server filters on equality; the username is compared again because the comparison can be
+// case-insensitive depending on the metadata database.
+func (c *Client) FindUserByUsername(username string) (*User, error) {
+	rows, err := listInto[rawUserModel](c, "/api/v1/security/users/", equals("username", username))
+	if err != nil {
+		return nil, fmt.Errorf("users named %q: %w", username, err)
+	}
+	for _, row := range rows {
+		if row.Username != username {
+			continue
+		}
+		user := &User{
+			ID:        row.ID,
+			Username:  row.Username,
+			FirstName: row.FirstName,
+			LastName:  row.LastName,
+			Email:     row.Email,
+			Active:    row.Active,
+			Roles:     make([]int64, len(row.Roles)),
+		}
+		for i, role := range row.Roles {
+			user.Roles[i] = role.ID
+		}
+		if row.Groups != nil {
+			user.Groups = ids(row.Groups)
+		}
+		return user, nil
+	}
+	return nil, ErrNotFound
+}

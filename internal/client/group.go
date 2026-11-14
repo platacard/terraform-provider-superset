@@ -143,3 +143,30 @@ func (c *Client) SyncDatabasePermissions(databaseID int64) error {
 	}
 	return decodeResponse(resp, nil, "sync the permissions of the database")
 }
+
+// FindGroupByName returns the group with exactly the given name, or ErrNotFound. Group names
+// are unique; the name is compared again because the server comparison can be
+// case-insensitive.
+func (c *Client) FindGroupByName(name string) (*Group, error) {
+	type row struct {
+		ID int64 `json:"id"`
+		groupResult
+	}
+	rows, err := listInto[row](c, groupsPath, equals("name", name))
+	if err != nil {
+		return nil, fmt.Errorf("groups named %q: %w", name, err)
+	}
+	for _, r := range rows {
+		if r.Name == name {
+			return &Group{
+				ID:          r.ID,
+				Name:        r.Name,
+				Label:       r.Label,
+				Description: r.Description,
+				Roles:       ids(r.Roles),
+				Users:       ids(r.Users),
+			}, nil
+		}
+	}
+	return nil, ErrNotFound
+}

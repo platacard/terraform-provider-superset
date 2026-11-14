@@ -145,3 +145,31 @@ func (c *Client) DeleteTheme(id int64) error {
 	}
 	return decodeResponse(resp, nil, "delete theme")
 }
+
+// FindThemes returns the themes with exactly the given name. The name is compared again
+// because the server comparison can be case-insensitive.
+func (c *Client) FindThemes(name string) ([]Theme, error) {
+	type row struct {
+		ID int64 `json:"id"`
+		themeResult
+	}
+	rows, err := listInto[row](c, themesPath, equals("theme_name", name))
+	if err != nil {
+		return nil, fmt.Errorf("themes named %q: %w", name, err)
+	}
+	matches := make([]Theme, 0, len(rows))
+	for _, r := range rows {
+		if r.Name == name {
+			matches = append(matches, Theme{
+				ID:            r.ID,
+				Name:          r.Name,
+				JSONData:      r.JSONData,
+				UUID:          r.UUID,
+				IsSystem:      r.IsSystem,
+				SystemDefault: r.SystemDefault,
+				SystemDark:    r.SystemDark,
+			})
+		}
+	}
+	return matches, nil
+}
