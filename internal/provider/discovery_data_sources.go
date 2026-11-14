@@ -50,6 +50,7 @@ type databaseSchemasDataSource struct {
 
 type databaseSchemasDataSourceModel struct {
 	DatabaseName types.String `tfsdk:"database_name"`
+	Catalog      types.String `tfsdk:"catalog"`
 	DatabaseID   types.Int64  `tfsdk:"database_id"`
 	Schemas      types.List   `tfsdk:"schemas"`
 }
@@ -65,6 +66,10 @@ func (d *databaseSchemasDataSource) Schema(_ context.Context, _ datasource.Schem
 			"database_name": schema.StringAttribute{
 				Description: "Name of the database connection.",
 				Required:    true,
+			},
+			"catalog": schema.StringAttribute{
+				Description: "Name of the catalog whose schemas are listed, on Superset 6 for connections with several catalogs; older versions ignore it. When unset, the default catalog of the connection.",
+				Optional:    true,
 			},
 			"database_id": schema.Int64Attribute{
 				Description: "Numeric identifier of the connection.",
@@ -90,7 +95,7 @@ func (d *databaseSchemasDataSource) Read(ctx context.Context, req datasource.Rea
 	if !ok {
 		return
 	}
-	schemas, err := d.client.DatabaseSchemas(databaseID)
+	schemas, err := d.client.DatabaseSchemas(databaseID, config.Catalog.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to List the Schemas of the Superset Database", err.Error())
 		return
@@ -127,6 +132,7 @@ type databaseTablesDataSource struct {
 type databaseTablesDataSourceModel struct {
 	DatabaseName types.String `tfsdk:"database_name"`
 	Schema       types.String `tfsdk:"schema"`
+	Catalog      types.String `tfsdk:"catalog"`
 	DatabaseID   types.Int64  `tfsdk:"database_id"`
 	Tables       types.List   `tfsdk:"tables"`
 }
@@ -156,6 +162,10 @@ func (d *databaseTablesDataSource) Schema(_ context.Context, _ datasource.Schema
 			"schema": schema.StringAttribute{
 				Description: "Name of the schema.",
 				Required:    true,
+			},
+			"catalog": schema.StringAttribute{
+				Description: "Name of the catalog of the schema, on Superset 6 for connections with several catalogs; older versions ignore it. When unset, the default catalog of the connection.",
+				Optional:    true,
 			},
 			"database_id": schema.Int64Attribute{
 				Description: "Numeric identifier of the connection.",
@@ -196,7 +206,7 @@ func (d *databaseTablesDataSource) Read(ctx context.Context, req datasource.Read
 		resp.Diagnostics.AddAttributeError(path.Root("schema"), "Missing Schema", "The schema must not be empty.")
 		return
 	}
-	tables, err := d.client.DatabaseTables(databaseID, config.Schema.ValueString())
+	tables, err := d.client.DatabaseTables(databaseID, config.Schema.ValueString(), config.Catalog.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to List the Tables of the Superset Database", err.Error())
 		return

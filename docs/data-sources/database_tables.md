@@ -36,6 +36,10 @@ resource "superset_dataset" "public" {
 - `database_name` (String) Name of the database connection.
 - `schema` (String) Name of the schema.
 
+### Optional
+
+- `catalog` (String) Name of the catalog of the schema, on Superset 6 for connections with several catalogs; older versions ignore it. When unset, the default catalog of the connection.
+
 ### Read-Only
 
 - `database_id` (Number) Numeric identifier of the connection.

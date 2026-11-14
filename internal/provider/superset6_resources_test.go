@@ -479,7 +479,7 @@ resource "superset_database_permissions_sync" "legacy" {
   database_id = 7
 }
 `,
-				ExpectError: regexp.MustCompile(`need Superset 6`),
+				ExpectError: regexp.MustCompile(`(?s)need\s+Superset\s+6`),
 			},
 		},
 	})

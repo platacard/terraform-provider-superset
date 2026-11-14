@@ -29,6 +29,10 @@ output "schemas" {
 
 - `database_name` (String) Name of the database connection.
 
+### Optional
+
+- `catalog` (String) Name of the catalog whose schemas are listed, on Superset 6 for connections with several catalogs; older versions ignore it. When unset, the default catalog of the connection.
+
 ### Read-Only
 
 - `database_id` (Number) Numeric identifier of the connection.

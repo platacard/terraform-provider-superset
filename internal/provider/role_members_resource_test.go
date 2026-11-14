@@ -238,7 +238,7 @@ func TestAccRoleMembersResourceOnLegacySuperset(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      roleMembersConfig(5, "  user_ids = [7]\n"),
-				ExpectError: regexp.MustCompile(`need Superset 6`),
+				ExpectError: regexp.MustCompile(`(?s)need\s+Superset\s+6`),
 			},
 		},
 	})

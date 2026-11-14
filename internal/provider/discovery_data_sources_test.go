@@ -14,11 +14,22 @@ import (
 func serveDiscovery() {
 	serveLookups()
 	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/3/schemas/",
-		httpmock.NewStringResponder(200, `{"result": ["public", "archive"]}`))
+		func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Query().Get("q") {
+			case "":
+				return httpmock.NewStringResponse(200, `{"result": ["public", "archive"]}`), nil
+			case "(catalog:'pgdb')":
+				return httpmock.NewStringResponse(200, `{"result": ["public"]}`), nil
+			}
+			return httpmock.NewStringResponse(200, `{"result": []}`), nil
+		})
 	httpmock.RegisterResponder("GET", "http://superset-host/api/v1/database/3/tables/",
 		func(req *http.Request) (*http.Response, error) {
-			if req.URL.Query().Get("q") == "(schema_name:'public')" {
+			switch req.URL.Query().Get("q") {
+			case "(schema_name:'public')":
 				return httpmock.NewStringResponse(200, `{"count": 2, "result": [{"value": "sales", "type": "table", "extra": null}, {"value": "daily_sales", "type": "view", "extra": null}]}`), nil
+			case "(catalog_name:'pgdb',schema_name:'public')":
+				return httpmock.NewStringResponse(200, `{"count": 1, "result": [{"value": "sales", "type": "table", "extra": null}]}`), nil
 			}
 			return httpmock.NewStringResponse(200, `{"count": 0, "result": []}`), nil
 		})
@@ -42,12 +53,19 @@ func TestAccDatabaseSchemasDataSource(t *testing.T) {
 data "superset_database_schemas" "test" {
   database_name = "Warehouse"
 }
+
+data "superset_database_schemas" "catalog" {
+  database_name = "Warehouse"
+  catalog       = "pgdb"
+}
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.superset_database_schemas.test", "database_id", "3"),
 					resource.TestCheckResourceAttr("data.superset_database_schemas.test", "schemas.#", "2"),
 					resource.TestCheckResourceAttr("data.superset_database_schemas.test", "schemas.0", "archive"),
 					resource.TestCheckResourceAttr("data.superset_database_schemas.test", "schemas.1", "public"),
+					resource.TestCheckResourceAttr("data.superset_database_schemas.catalog", "schemas.#", "1"),
+					resource.TestCheckResourceAttr("data.superset_database_schemas.catalog", "schemas.0", "public"),
 				),
 			},
 			{
@@ -77,6 +95,12 @@ data "superset_database_tables" "test" {
   database_name = "Warehouse"
   schema        = "public"
 }
+
+data "superset_database_tables" "catalog" {
+  database_name = "Warehouse"
+  schema        = "public"
+  catalog       = "pgdb"
+}
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.superset_database_tables.test", "database_id", "3"),
@@ -85,6 +109,8 @@ data "superset_database_tables" "test" {
 					resource.TestCheckResourceAttr("data.superset_database_tables.test", "tables.0.type", "view"),
 					resource.TestCheckResourceAttr("data.superset_database_tables.test", "tables.1.name", "sales"),
 					resource.TestCheckResourceAttr("data.superset_database_tables.test", "tables.1.type", "table"),
+					resource.TestCheckResourceAttr("data.superset_database_tables.catalog", "tables.#", "1"),
+					resource.TestCheckResourceAttr("data.superset_database_tables.catalog", "tables.0.name", "sales"),
 				),
 			},
 			{
