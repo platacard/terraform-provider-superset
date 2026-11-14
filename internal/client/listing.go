@@ -175,6 +175,14 @@ func (p *permissionIndex) lookup(viewMenu string) (map[string]int64, bool) {
 	return permissions, ok
 }
 
+// forget drops the cached permissions of a view menu, after a permission was granted on it
+// or removed from it, so the next lookup reads them again.
+func (p *permissionIndex) forget(viewMenu string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.viewMenus, viewMenu)
+}
+
 func (p *permissionIndex) store(viewMenu string, permissions map[string]int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
