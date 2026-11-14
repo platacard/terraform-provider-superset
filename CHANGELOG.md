@@ -1,6 +1,7 @@
 ## Unreleased
 
 FEATURES:
+* **New Resource**: `superset_database_upload` - A CSV, Excel or columnar file loaded into a table of a database connection through the upload endpoint of Superset 4.1 and later, uploaded again when its content, its reading options or its triggers change, with an optional drop of the table on destroy.
 * **New Resource**: `superset_chart_cache_warmup` - Computes a chart and stores its result in the cache when created and whenever its triggers change, for example after the data was loaded.
 * **New Resource**: `superset_cache_invalidation` - Drops the cached results of datasets when created and whenever its triggers change.
 * **New Resource**: `superset_permission_view` - A permission granted on a view menu, the pair roles are given, for the view menus of a custom security manager; the view menu is created when missing and deleted with the resource.

@@ -92,6 +92,11 @@ func addSecretFields(fields map[string]string, options ImportOptions) error {
 
 // uploadBundle posts a bundle as a multipart form with the given fields.
 func (c *Client) uploadBundle(endpoint, fileField string, fields map[string]string, content []byte, action string) error {
+	return c.uploadFile(endpoint, fileField, "bundle.zip", fields, content, action)
+}
+
+// uploadFile posts a file as a multipart form with the given fields.
+func (c *Client) uploadFile(endpoint, fileField, fileName string, fields map[string]string, content []byte, action string) error {
 	headers, cookies, err := c.csrfHeaders()
 	if err != nil {
 		return err
@@ -104,7 +109,7 @@ func (c *Client) uploadBundle(endpoint, fileField string, fields map[string]stri
 			return err
 		}
 	}
-	file, err := form.CreateFormFile(fileField, "bundle.zip")
+	file, err := form.CreateFormFile(fileField, fileName)
 	if err != nil {
 		return err
 	}
