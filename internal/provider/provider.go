@@ -299,6 +299,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDatasetRelatedObjectsDataSource,  // Charts and dashboards built on a dataset
 		NewDatabaseRelatedObjectsDataSource, // Charts and dashboards that depend on a connection
 		NewDatabaseEnginesDataSource,        // Engines the instance can connect to
+		NewDatabaseCatalogsDataSource,       // Catalogs of a database connection (Superset 6)
 	}
 }
 

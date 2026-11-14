@@ -279,7 +279,7 @@ data "superset_theme" "test" {
   name = "Corporate"
 }
 `,
-				ExpectError: regexp.MustCompile(`need Superset 6`),
+				ExpectError: regexp.MustCompile(`(?s)need\s+Superset\s+6`),
 			},
 		},
 	})
