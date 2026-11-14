@@ -330,6 +330,7 @@ func (p *supersetProvider) Resources(_ context.Context) []func() resource.Resour
 		NewPermissionViewResource,          // Permission granted on a view menu
 		NewChartCacheWarmupResource,        // Cache warm-up of a chart
 		NewCacheInvalidationResource,       // Cache invalidation of datasets
+		NewDatabaseUploadResource,          // File loaded into a table of a connection
 		NewDashboardImportResource,         // Dashboard import
 		NewChartImportResource,             // Chart import
 		NewDatasetImportResource,           // Dataset import
