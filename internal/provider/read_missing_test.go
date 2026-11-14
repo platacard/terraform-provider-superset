@@ -23,6 +23,12 @@ var bundleResources = map[string]bool{
 	"superset_dataset_import":   true,
 }
 
+// actionResources run an action against Superset and manage no object of their own, so their
+// read has nothing to find missing and keeps the state.
+var actionResources = map[string]bool{
+	"superset_cache_invalidation": true,
+}
+
 // serveNothing makes the fake Superset host answer like an instance that has no objects:
 // filtered lists are empty and every object is "Not found".
 func serveNothing() {
@@ -85,7 +91,7 @@ func TestReadOfAMissingObjectRemovesTheResource(t *testing.T) {
 	}
 
 	for name, s := range schemas.ResourceSchemas {
-		if bundleResources[name] {
+		if bundleResources[name] || actionResources[name] {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
