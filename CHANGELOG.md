@@ -1,4 +1,4 @@
-## Unreleased
+## 1.2.0 (2026-11-14)
 
 FEATURES:
 * **New Resource**: `superset_database_upload` - A CSV, Excel or columnar file loaded into a table of a database connection through the upload endpoint of Superset 4.1 and later, uploaded again when its content, its reading options or its triggers change, with an optional drop of the table on destroy.
