@@ -13,6 +13,7 @@ FEATURES:
 * **New Data Source**: `superset_dashboards` - The dashboards that match a few filters (owner, tag, published), with their ids, titles and slugs, for example every published dashboard.
 * **New Data Source**: `superset_dataset_related_objects` - The charts and dashboards built on a dataset.
 * **New Data Source**: `superset_database_related_objects` - The charts and dashboards that depend on a database connection, looked up by its name or its id.
+* **New Data Source**: `superset_database_engines` - The database engines the instance can connect to, with their drivers and the shape of their connection URI, for example to check that a driver is installed.
 
 ## 1.1.0 (2026-11-14)
 

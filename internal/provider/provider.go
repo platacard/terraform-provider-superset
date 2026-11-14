@@ -298,6 +298,7 @@ func (p *supersetProvider) DataSources(_ context.Context) []func() datasource.Da
 		NewDashboardsDataSource,             // Dashboards matching filters
 		NewDatasetRelatedObjectsDataSource,  // Charts and dashboards built on a dataset
 		NewDatabaseRelatedObjectsDataSource, // Charts and dashboards that depend on a connection
+		NewDatabaseEnginesDataSource,        // Engines the instance can connect to
 	}
 }
 
